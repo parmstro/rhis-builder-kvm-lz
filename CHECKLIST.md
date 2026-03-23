@@ -67,6 +67,7 @@ You can provide most items in one of three ways:
 
 - The script can derive an access token from the offline token in some flows, but the current prompt flow expects both values to be available.
 - These credentials are used for registration, repo enablement, ISO access, and bundle download.
+- By default, guest kickstarts also attempt `rhc connect` (`RHC_AUTO_CONNECT=1`). Set `RHC_AUTO_CONNECT=0` to disable.
 
 ---
 
@@ -132,6 +133,7 @@ You can provide most items in one of three ways:
 
 ### Required by prompt flow or strong recommended customization
 
+- [ ] `INTERNAL_NETWORK` — shared internal network CIDR base (example: `10.168.0.0`)
 - [ ] `NETMASK` — shared internal subnet mask
 - [ ] `INTERNAL_GW` — shared internal gateway
 - [ ] `SAT_IP` — Satellite internal IP
@@ -140,14 +142,21 @@ You can provide most items in one of three ways:
 - [ ] `SAT_HOSTNAME` — Satellite FQDN
 - [ ] `AAP_HOSTNAME` — AAP FQDN
 - [ ] `IDM_HOSTNAME` — IdM FQDN
+- [ ] `SAT_ALIAS` — Satellite short role alias (default `satellite`)
+- [ ] `AAP_ALIAS` — AAP short role alias (default `aap`)
+- [ ] `IDM_ALIAS` — IdM short role alias (default `idm`)
 
 ### Default values currently assumed by the script
 
+- `INTERNAL_NETWORK=10.168.0.0`
 - `SAT_IP=10.168.128.1`
 - `AAP_IP=10.168.128.2`
 - `IDM_IP=10.168.128.3`
 - `NETMASK=255.255.0.0`
-- `INTERNAL_GW=0.0.0.0`
+- `INTERNAL_GW=10.168.0.1`
+- `SAT_ALIAS=satellite`
+- `AAP_ALIAS=aap`
+- `IDM_ALIAS=idm`
 
 ### Where these come from
 
@@ -213,6 +222,12 @@ You can provide most items in one of three ways:
 - [ ] `OEMDRV_ISO`
 - [ ] `HOST_INT_IP`
 
+### Runtime UX tuning (optional)
+
+- [ ] `RHIS_POST_VM_SETTLE_GRACE` (default `300`)
+- [ ] `RHIS_INTERNAL_SSH_WARN_GRACE` (default `600`)
+- [ ] `RHIS_INTERNAL_SSH_LOG_EVERY` (default `60`)
+
 ### Notes
 
 - Only needed if you do **not** want the script defaults.
@@ -235,6 +250,7 @@ If you want the shortest practical checklist, gather these first:
 - [ ] Satellite / AAP / IdM internal IPs and hostnames
 - [ ] Satellite org and location
 - [ ] IdM DS password
+- [ ] AAP deployment model choice (enterprise multi-node `inventory.j2` or growth single-node `inventory-growth.j2`; DEMO is auto-selected with `--demo`)
 
 ---
 
@@ -243,12 +259,20 @@ If you want the shortest practical checklist, gather these first:
 1. Fill in the required values
 2. Run:
    - `./run_rhis_install_sequence.sh --reconfigure`
+   - During `--reconfigure`, an interactive **inventory architecture submenu** will appear
+     to select the AAP installer deployment model (enterprise or growth; use `--demo` to skip)
 3. Verify values were written to:
    - `~/.ansible/conf/env.yml`
 4. Clean old lab state if needed:
    - `./run_rhis_install_sequence.sh --demokill`
 5. Build the demo stack:
    - `./run_rhis_install_sequence.sh --demo`
+6. Optional read-only status snapshot (no provisioning changes):
+  - `./run_rhis_install_sequence.sh --status`
+7. Optional: run a fast validation sweep after cleanup / before a full rebuild:
+  - `./run_rhis_install_sequence.sh --test=fast --demo`
+8. Optional: run the broader integration-style test sweep:
+  - `./run_rhis_install_sequence.sh --test=full --demo`
 
 ---
 
@@ -268,5 +292,6 @@ If you want the shortest practical checklist, gather these first:
 - [ ] URLs are current authenticated download URLs
 - [ ] Tokens are still valid
 - [ ] Host has enough free disk space for ISO + qcow2 images + AAP bundle
+- [ ] If using test mode, review `~/.ansible/conf/ansible-provisioner.log` after the run
 - [ ] KVM/libvirt is working (`virsh list --all` succeeds)
 - [ ] Your chosen internal IPs do not conflict with an existing network

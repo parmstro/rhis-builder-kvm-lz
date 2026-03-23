@@ -1,0 +1,424 @@
+---
+# This is the main rhis-builder-satellite entry point.
+# This play is expected to be run from inside the rhis-provisioner container.
+# If running independently, please ensure that all requirements and prerequisites for executing the play are met.
+
+- name: "Build the satellite primary"
+  hosts: sat_primary
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: "Load the vault variables"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+      tags:
+        - always
+
+    - name: "Load the other variables"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+      tags:
+        - always
+
+    - name: "Load the vault variables"
+      when: vault_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vault_dir }}"
+      tags:
+        - always
+
+    - name: "Load the other variables"
+      when: vars_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vars_dir }}"
+      tags:
+        - always
+
+    - name: "Apply role of satellite_pre to {{ ansible_fqdn }}"
+      when: satellite_disconnected
+      ansible.builtin.include_role:
+        name: satellite_disconnected_pre
+      tags:
+        - tags_satellite_pre
+        - tags_satellite_before_sync
+
+    - name: "Apply role of satellite_pre to {{ ansible_fqdn }}"
+      ansible.builtin.include_role:
+        name: satellite_pre
+      tags:
+        - tags_satellite_pre
+        - tags_satellite_before_sync
+
+    - name: "Apply role of satellite to {{ ansible_fqdn }}"
+      ansible.builtin.include_role:
+        name: satellite
+      tags:
+        - tags_satellite_install
+        - tags_satellite_before_sync
+
+    - name: "Apply role of satellite_post to {{ ansible_fqdn }}"
+      ansible.builtin.include_role:
+        name: satellite_post
+      tags:
+        - tags_satellite_post
+        - tags_satellite_before_sync
+
+    - name: "Ensure hammer configuration"
+      ansible.builtin.import_tasks: "tasks/configure_hammer.yml"
+      tags:
+        - tags_basic_config
+        - tags_configure_hammer
+        - tags_satellite_before_sync
+
+    - name: "Ensure Satellite manifest configuration on console.redhat.com"
+      ansible.builtin.import_role:
+        name: redhat_manifests
+      tags:
+        - tags_basic_config
+        - tags_manifest
+        - tags_satellite_before_sync
+
+    - name: "Ensure Satellite manifest configuration in target Satellite"
+      ansible.builtin.import_role:
+        name: subscription_manifests
+      tags:
+        - tags_basic_config
+        - tags_manifest
+        - tags_satellite_before_sync
+
+    - name: "Ensure Kerberos Remote Execution configuration"
+      when:
+        - satellite_pre_use_idm
+        - rex_kerberos_enabled
+      ansible.builtin.import_role:
+        name: rex_kerberos
+      tags:
+        - tags_basic_config
+        - tags_rex_kerberos
+        - tags_satellite_before_sync
+
+    - name: "Ensure content credentials configuration"
+      ansible.builtin.import_role:
+        name: content_credentials
+      tags:
+        - tags_content_config
+        - tags_redhat_repos
+        - tags_repository_sets
+        - tags_satellite_before_sync
+
+    - name: "Ensure repository sets configuration"
+      when: not satellite_disconnected
+      ansible.builtin.import_role:
+        name: repository_sets
+      tags:
+        - tags_content_config
+        - tags_redhat_repos
+        - tags_repository_sets
+        - tags_satellite_before_sync
+
+    - name: "Ensure custom products configuration"
+      ansible.builtin.import_role:
+        name: custom_products
+      tags:
+        - tags_content_config
+        - custom_repos
+        - tags_repositories
+        - tags_satellite_before_sync
+
+    - name: "Ensure additional repository configuration"
+      when: not satellite_disconnected
+      ansible.builtin.import_role:
+        name: repositories
+      tags:
+        - tags_content_config
+        - custom_repos
+        - tags_repositories
+        - tags_satellite_before_sync
+
+    # This task should occur synchronously - we want all the repos populated before we start creating content views
+    - name: "Ensure repository synchronization... go grab a meal, this will take a while"
+      when: not satellite_disconnected
+      ansible.builtin.import_tasks: "tasks/start_synchronization.yml"
+      tags:
+        - tags_content_config
+        - tags_sync
+
+    - name: "Ensure content import... go grab a meal, this will take a while"
+      when: satellite_disconnected
+      ansible.builtin.import_role:
+        name: "content_imports"
+      tags:
+        - tags_content_config
+        - tags_sync
+
+    - name: "Ensure lifecycle environments are configured"
+      ansible.builtin.import_role:
+        name: lifecycle_environments
+      tags:
+        - tags_post_sync
+        - tags_content_config
+        - tags_lifecycle_environments
+
+    - name: "Ensure sync plans are attached and configured"
+      when: not satellite_disconnected
+      ansible.builtin.import_role:
+        name: sync_plans
+      tags:
+        - tags_post_sync
+        - tags_content_config
+        - sync_plans
+
+    - name: "Ensure content view configurations"
+      ansible.builtin.import_role:
+        name: content_views
+      tags:
+        - tags_post_sync
+        - tags_content_config
+        - tags_content_views
+
+#    We are currently ensuring sync'd content for media
+#    Satellite automatically creates the media when kickstart trees are added.
+    - name: "Configure OS media"
+      ansible.builtin.import_role:
+        name: "installation_media"
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_media
+
+    - name: "Configure partition tables"
+      ansible.builtin.import_role:
+        name: partition_tables
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_ptables
+
+    - name: "Configure provisioning templates"
+      ansible.builtin.import_role:
+        name: provisioning_templates
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_provisioning_templates
+
+    - name: "Synchronized satellite template repositories"
+      ansible.builtin.import_role:
+        name: templates_sync
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_templates_sync
+
+    - name: "Configure operating systems"
+      ansible.builtin.import_role:
+        name: operating_systems
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_operating_systems
+
+    - name: "Configure activation keys"
+      ansible.builtin.import_role:
+        name: activation_keys
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_activation_keys
+
+    - name: "Configure domains"
+      ansible.builtin.import_role:
+        name: domains
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_network
+        - tags_domains
+
+    - name: "Configure AD or IdM REALMs"
+      ansible.builtin.import_role:
+        name: realms
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_network
+        - tags_realms
+
+    - name: "Configure network subnets"
+      ansible.builtin.import_role:
+        name: subnets
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_network
+        - tags_subnets
+
+    - name: "Build PXE Linux defaults"
+      ansible.builtin.import_tasks: "tasks/build_pxe_linux_defaults.yml"
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_pxe_defaults
+
+    - name: "Configure compute resources"
+      ansible.builtin.import_role:
+        name: compute_resources
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_compute_resources
+
+    - name: "Configure compute profiles"
+      ansible.builtin.import_role:
+        name: compute_profiles
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_compute_profiles
+
+    - name: "Configure virt-who configurations"
+      ansible.builtin.import_role:
+        name: virtwho_configs
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_virt_who
+
+    - name: "Configure ansible role git repos"
+      ansible.builtin.import_role:
+        name: imported_git_repos
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_scap
+        - tags_clone_git_repos
+
+    - name: "Ensure import ansible roles"
+      ansible.builtin.import_tasks: "tasks/ensure_import_roles.yml"
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_scap
+        - tags_ansible_import_roles
+
+    - name: "Configure SCAP content files"
+      ansible.builtin.import_role:
+        name: scap_contents
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_scap
+        - tags_scap_contents
+
+    - name: "Configure SCAP tailoring files"
+      ansible.builtin.import_role:
+        name: scap_tailoring_files
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_scap
+        - tags_scap_tailoring_files
+
+    - name: "Configure hostgroups"
+      ansible.builtin.import_role:
+        name: hostgroups
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_host_groups
+
+    - name: "Configure SCAP policies"
+      ansible.builtin.import_role:
+        name: scap_policies
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_scap
+        - tags_scap_policies
+
+    - name: "Configure discovery rules"
+      ansible.builtin.import_role:
+        name: discovery_rules
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_discovery_rules
+
+    - name: "Configure global parameters"
+      ansible.builtin.import_role:
+        name: global_parameters
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_provisioning_config
+        - tags_global_parameters
+
+    - name: "Configure general settings"
+      ansible.builtin.import_role:
+        name: settings
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_satellite_settings
+
+    - name: "Configure satellite user roles"
+      ansible.builtin.import_role:
+        name: user_roles
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_rbac_config
+        - tags_user_roles
+
+    - name: "Configure satellite users"
+      ansible.builtin.import_role:
+        name: users
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_rbac_config
+        - tags_users
+
+    - name: "Configure satellite user groups"
+      ansible.builtin.import_role:
+        name: user_groups
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_rbac_config
+        - tags_user_groups
+
+    - name: "Configure satellite external user groups"
+      ansible.builtin.import_role:
+        name: user_groups_external
+      tags:
+        - tags_post_sync
+        - tags_post_publication
+        - tags_rbac_config
+        - tags_user_groups_external
+
+# End of Satellite Configuration
