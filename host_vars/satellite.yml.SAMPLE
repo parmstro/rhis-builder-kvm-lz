@@ -9,12 +9,18 @@
 # (see ~/.ansible/conf/env.yml) and be referenced via Jinja2 lookups.
 # ---
 
-ansible_user: "root"
+ansible_user: "admin"
 ansible_admin_password: "{{ global_admin_password | default('') }}"
 ansible_password: "{{ global_admin_password | default('') }}"
 ansible_become: true
 ansible_connection: ssh
 ansible_ssh_private_key_file: "/home/{{ lookup('env', 'USER') | default('root') }}/.ssh/id_rsa"
+satellite_username: "admin"
+satellite_password: "{{ sat_admin_pass | default(global_admin_password) | default('') }}"
+foreman_username: "admin"
+foreman_password: "{{ sat_admin_pass | default(global_admin_password) | default('') }}"
+hammer_username: "admin"
+hammer_password: "{{ sat_admin_pass | default(global_admin_password) | default('') }}"
 
 # Satellite organization and location (must match what is configured in env.yml)
 # satellite_organization: "MY_ORG"
