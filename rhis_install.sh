@@ -123,7 +123,7 @@ RHIS_HEALTHCHECK_AUTOFIX="${RHIS_HEALTHCHECK_AUTOFIX:-1}"
 RHIS_HEALTHCHECK_RERUN_COMPONENT="${RHIS_HEALTHCHECK_RERUN_COMPONENT:-1}"
 RHC_AUTO_CONNECT="${RHC_AUTO_CONNECT:-1}"
 # If enabled, fail the run when root-to-root SSH mesh cannot be fully established.
-# Default keeps root mesh best-effort while installer-user mesh remains mandatory.
+# Default keeps root mesh best-effort while admin mesh remains mandatory.
 RHIS_REQUIRE_ROOT_SSH_MESH="${RHIS_REQUIRE_ROOT_SSH_MESH:-0}"
 # Optional pre-flight ad-hoc probes/upgrades before phase playbooks.
 # Default OFF to avoid noisy lockout-prone retries on fresh installs.
@@ -8662,7 +8662,7 @@ fix_vm_root_passwords() {
 }
 
 setup_rhis_ssh_mesh() {
-    local root_pass installer_user installer_pass ip pub login_user login_pass
+    local root_pass installer_user installer_pass mesh_user mesh_pass ip pub login_user login_pass
     local ssh_bootstrap_retries ssh_bootstrap_delay
     local local_installer_pub=""
     local local_root_pub=""
@@ -8670,11 +8670,13 @@ setup_rhis_ssh_mesh() {
     local root_mesh_required=0
     local -a node_ips all_pubs root_pubs node_names
     local bootstrap_cmd append_cmd bootstrap_root_cmd append_root_cmd
-    local bootstrap_root_via_admin_cmd read_root_pub_via_admin_cmd
+    local bootstrap_root_via_mesh_cmd read_root_pub_via_mesh_cmd
 
     root_pass="${ROOT_PASS:-${ADMIN_PASS:-}}"
     installer_user="${INSTALLER_USER:-${ADMIN_USER}}"
     installer_pass="${ADMIN_PASS:-}"
+    mesh_user="${ADMIN_USER:-admin}"
+    mesh_pass="${ADMIN_PASS:-}"
     ssh_bootstrap_retries="${RHIS_SSH_BOOTSTRAP_RETRIES:-45}"
     ssh_bootstrap_delay="${RHIS_SSH_BOOTSTRAP_DELAY:-10}"
     if is_enabled "${RHIS_REQUIRE_ROOT_SSH_MESH:-0}"; then
@@ -8734,7 +8736,7 @@ setup_rhis_ssh_mesh() {
         sudo bash -lc "sshpass -p '${root_pass}' ssh-copy-id -i /root/.ssh/id_rsa.pub -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@127.0.0.1 >/dev/null 2>&1 || true" || true
     fi
 
-    bootstrap_cmd='set -e; target_user="'"${installer_user}"'"; if ! id "$target_user" >/dev/null 2>&1; then useradd -m -G wheel "$target_user" >/dev/null 2>&1 || useradd -m "$target_user" >/dev/null 2>&1 || true; fi; target_home="$(getent passwd "$target_user" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/$target_user"; install -d -m 700 -o "$target_user" -g "$target_user" "$target_home/.ssh"; if [ ! -f "$target_home/.ssh/id_rsa" ]; then sudo -u "$target_user" ssh-keygen -q -t rsa -b 4096 -N "" -f "$target_home/.ssh/id_rsa"; fi; touch "$target_home/.ssh/authorized_keys"; chown "$target_user:$target_user" "$target_home/.ssh/authorized_keys"; chmod 600 "$target_home/.ssh/authorized_keys"; cat > "$target_home/.ssh/config" <<EOF
+    bootstrap_cmd='set -e; target_user="'"${mesh_user}"'"; if ! id "$target_user" >/dev/null 2>&1; then echo "missing-user:${mesh_user}"; exit 1; fi; target_home="$(getent passwd "$target_user" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/$target_user"; install -d -m 700 -o "$target_user" -g "$target_user" "$target_home/.ssh"; if [ ! -f "$target_home/.ssh/id_rsa" ]; then sudo -u "$target_user" ssh-keygen -q -t rsa -b 4096 -N "" -f "$target_home/.ssh/id_rsa"; fi; touch "$target_home/.ssh/authorized_keys"; chown "$target_user:$target_user" "$target_home/.ssh/authorized_keys"; chmod 600 "$target_home/.ssh/authorized_keys"; cat > "$target_home/.ssh/config" <<EOF
 Host *
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
@@ -8742,13 +8744,13 @@ Host *
 EOF
 chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target_home/.ssh/config"; cat "$target_home/.ssh/id_rsa.pub" >> "$target_home/.ssh/authorized_keys"; sort -u "$target_home/.ssh/authorized_keys" -o "$target_home/.ssh/authorized_keys"'
 
-    print_step "Bootstrapping installer-user SSH config/keys on RHIS nodes (${installer_user})"
+    print_step "Bootstrapping admin SSH config/keys on RHIS nodes (${mesh_user})"
     for ip in "${node_ips[@]}"; do
         local _bootstrap_ok=0
         local _attempt
         for _attempt in $(seq 1 "${ssh_bootstrap_retries}"); do
-            login_user="${installer_user}"
-            login_pass="${installer_pass}"
+            login_user="${mesh_user}"
+            login_pass="${mesh_pass}"
             if [ -n "${login_pass}" ] && sshpass -p "$login_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${login_user}@${ip}" "$bootstrap_cmd" >/dev/null 2>&1; then
                 _bootstrap_ok=1
                 break
@@ -8766,24 +8768,24 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
         done
 
         if [ "${_bootstrap_ok}" -ne 1 ]; then
-            print_warning "SSH bootstrap failed for ${ip} as ${installer_user} and root after ${ssh_bootstrap_retries} attempts."
+            print_warning "SSH bootstrap failed for ${ip} as ${mesh_user} and root after ${ssh_bootstrap_retries} attempts."
             return 1
         fi
     done
 
     # Ensure root keypair exists on every node.
     bootstrap_root_cmd='set -e; install -d -m 700 /root/.ssh; if [ ! -f /root/.ssh/id_rsa ]; then ssh-keygen -q -t rsa -b 4096 -N "" -f /root/.ssh/id_rsa; fi; touch /root/.ssh/authorized_keys; [ -f /root/.ssh/id_rsa.pub ] && cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys; sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys; chmod 600 /root/.ssh/id_rsa 2>/dev/null || true; chmod 644 /root/.ssh/id_rsa.pub 2>/dev/null || true; chmod 600 /root/.ssh/authorized_keys'
-    bootstrap_root_via_admin_cmd="sudo -n bash -lc '$(printf '%s' "${bootstrap_root_cmd}" | sed "s/'/'\\''/g")'"
-    read_root_pub_via_admin_cmd="sudo -n cat /root/.ssh/id_rsa.pub"
+    bootstrap_root_via_mesh_cmd="sudo -n bash -lc '$(printf '%s' "${bootstrap_root_cmd}" | sed "s/'/'\\''/g")'"
+    read_root_pub_via_mesh_cmd="sudo -n cat /root/.ssh/id_rsa.pub"
     print_step "Bootstrapping root SSH keys on RHIS nodes"
     for ip in "${node_ips[@]}"; do
         if [ -n "$root_pass" ]; then
             if sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" "$bootstrap_root_cmd" >/dev/null 2>&1; then
                 :
-            elif [ -n "${installer_pass}" ] && sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" "${bootstrap_root_via_admin_cmd}" >/dev/null 2>&1; then
-                print_step "Root SSH bootstrap on ${ip} completed via ${installer_user} + sudo fallback."
+            elif [ -n "${mesh_pass}" ] && sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" "${bootstrap_root_via_mesh_cmd}" >/dev/null 2>&1; then
+                print_step "Root SSH bootstrap on ${ip} completed via ${mesh_user} + sudo fallback."
             else
-                print_warning "Root SSH bootstrap failed for ${ip} via direct root and ${installer_user} + sudo fallback."
+                print_warning "Root SSH bootstrap failed for ${ip} via direct root and ${mesh_user} + sudo fallback."
                 if [ "${root_mesh_required}" -eq 1 ]; then
                     return 1
                 fi
@@ -8791,10 +8793,10 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
                 continue
             fi
         else
-            if [ -n "${installer_pass}" ] && sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" "${bootstrap_root_via_admin_cmd}" >/dev/null 2>&1; then
-                print_step "Root SSH bootstrap on ${ip} completed via ${installer_user} + sudo fallback."
+            if [ -n "${mesh_pass}" ] && sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" "${bootstrap_root_via_mesh_cmd}" >/dev/null 2>&1; then
+                print_step "Root SSH bootstrap on ${ip} completed via ${mesh_user} + sudo fallback."
             else
-                print_warning "Root password unavailable and ${installer_user} + sudo fallback failed; cannot bootstrap root SSH keys on ${ip}."
+                print_warning "Root password unavailable and ${mesh_user} + sudo fallback failed; cannot bootstrap root SSH keys on ${ip}."
                 if [ "${root_mesh_required}" -eq 1 ]; then
                     return 1
                 fi
@@ -8804,33 +8806,31 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
         fi
     done
 
-    print_step "Collecting ${installer_user} public keys for full mesh trust"
+    print_step "Collecting ${mesh_user} public keys for full mesh trust"
     for ip in "${node_ips[@]}"; do
-        pub="$(sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" 'target_home="$(getent passwd "'"${installer_user}"'" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/'"${installer_user}"'"; cat "$target_home/.ssh/id_rsa.pub"' 2>/dev/null || true)"
+        pub="$(sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" 'target_home="$(getent passwd "'"${mesh_user}"'" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/'"${mesh_user}"'"; cat "$target_home/.ssh/id_rsa.pub"' 2>/dev/null || true)"
         if [ -z "$pub" ] && [ -n "$root_pass" ]; then
-            pub="$(sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" 'target_home="$(getent passwd "'"${installer_user}"'" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/'"${installer_user}"'"; cat "$target_home/.ssh/id_rsa.pub"' 2>/dev/null || true)"
+            pub="$(sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" 'target_home="$(getent passwd "'"${mesh_user}"'" | cut -d: -f6)"; [ -n "$target_home" ] || target_home="/home/'"${mesh_user}"'"; cat "$target_home/.ssh/id_rsa.pub"' 2>/dev/null || true)"
         fi
         if [ -z "$pub" ]; then
-            print_warning "Could not read ${installer_user} SSH public key from ${ip}."
+            print_warning "Could not read ${mesh_user} SSH public key from ${ip}."
             return 1
         fi
         all_pubs+=("$pub")
     done
 
-    [ -n "${local_installer_pub}" ] && all_pubs+=("${local_installer_pub}")
-
-    print_step "Distributing trusted keys to all nodes (${installer_user}-to-${installer_user} mesh)"
+    print_step "Distributing trusted keys to all nodes (${mesh_user}-to-${mesh_user} mesh)"
     for ip in "${node_ips[@]}"; do
         for pub in "${all_pubs[@]}"; do
-            append_cmd="target_home=\"\$(getent passwd '${installer_user}' | cut -d: -f6)\"; [ -n \"\$target_home\" ] || target_home=\"/home/${installer_user}\"; printf '%s\\n' '$pub' >> \"\$target_home/.ssh/authorized_keys\"; sort -u \"\$target_home/.ssh/authorized_keys\" -o \"\$target_home/.ssh/authorized_keys\"; chown '${installer_user}:${installer_user}' \"\$target_home/.ssh/authorized_keys\"; chmod 600 \"\$target_home/.ssh/authorized_keys\""
-            if ! sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" "$append_cmd" >/dev/null 2>&1; then
+            append_cmd="target_home=\"\$(getent passwd '${mesh_user}' | cut -d: -f6)\"; [ -n \"\$target_home\" ] || target_home=\"/home/${mesh_user}\"; printf '%s\\n' '$pub' >> \"\$target_home/.ssh/authorized_keys\"; sort -u \"\$target_home/.ssh/authorized_keys\" -o \"\$target_home/.ssh/authorized_keys\"; chown '${mesh_user}:${mesh_user}' \"\$target_home/.ssh/authorized_keys\"; chmod 600 \"\$target_home/.ssh/authorized_keys\""
+            if ! sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" "$append_cmd" >/dev/null 2>&1; then
                 if [ -n "$root_pass" ]; then
                     sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" "$append_cmd" >/dev/null 2>&1 || {
-                        print_warning "Failed to distribute SSH key to ${ip} as ${installer_user} and root."
+                        print_warning "Failed to distribute SSH key to ${ip} as ${mesh_user} and root."
                         return 1
                     }
                 else
-                    print_warning "Failed to distribute SSH key to ${ip} as ${installer_user}; root fallback unavailable."
+                    print_warning "Failed to distribute SSH key to ${ip} as ${mesh_user}; root fallback unavailable."
                     return 1
                 fi
             fi
@@ -8844,46 +8844,15 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
     sort -u "${HOME}/.ssh/authorized_keys" -o "${HOME}/.ssh/authorized_keys" || true
     chmod 600 "${HOME}/.ssh/authorized_keys" || true
 
-    # Explicit install-host key push to installer_user, ADMIN_USER (Ansible inventory user), and root
-    # on each RHIS node.  ADMIN_USER is the account the Ansible inventory connects as; it must also
-    # trust the RHIS installer key so the provisioner container can reach all nodes via Ansible.
-    local admin_user="${ADMIN_USER:-${installer_user}}"
+    # Explicit install-host key push to root on each RHIS node.
+    # Installer-host user key (e.g., sgallego) is intentionally restricted to root
+    # on managed nodes because those nodes only expose admin/root accounts.
     if [ -n "${local_installer_pub}" ] && [ -f "${RHIS_INSTALLER_SSH_PUBLIC_KEY}" ]; then
         local i push_ip push_name pub_b64
         pub_b64="$(printf '%s' "${local_installer_pub}" | base64 -w0 2>/dev/null || true)"
         for i in 0 1 2; do
             push_ip="${node_ips[$i]}"
             push_name="${node_names[$i]}"
-
-            # install-host key -> installer_user (sgallego / INSTALLER_USER)
-            if command -v ssh-copy-id >/dev/null 2>&1 && [ -n "${installer_pass}" ]; then
-                sshpass -p "${installer_pass}" ssh-copy-id -i "${RHIS_INSTALLER_SSH_PUBLIC_KEY}" \
-                    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-                    "${installer_user}@${push_ip}" >/dev/null 2>&1 || true
-            fi
-            if [ -n "${pub_b64}" ]; then
-                append_cmd="target_home=\"\$(getent passwd '${installer_user}' | cut -d: -f6)\"; [ -n \"\$target_home\" ] || target_home=\"/home/${installer_user}\"; install -d -m 700 -o '${installer_user}' -g '${installer_user}' \"\$target_home/.ssh\"; touch \"\$target_home/.ssh/authorized_keys\"; printf '%s' '${pub_b64}' | base64 -d >> \"\$target_home/.ssh/authorized_keys\"; sort -u \"\$target_home/.ssh/authorized_keys\" -o \"\$target_home/.ssh/authorized_keys\"; chown '${installer_user}:${installer_user}' \"\$target_home/.ssh/authorized_keys\"; chmod 600 \"\$target_home/.ssh/authorized_keys\""
-                sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${push_ip}" "$append_cmd" >/dev/null 2>&1 || true
-            fi
-
-            # install-host key -> admin_user (ADMIN_USER — the Ansible inventory connection user)
-            # This is separate from installer_user when ADMIN_USER != INSTALLER_USER.
-            if [ "${admin_user}" != "${installer_user}" ]; then
-                if command -v ssh-copy-id >/dev/null 2>&1 && [ -n "${installer_pass}" ]; then
-                    sshpass -p "${installer_pass}" ssh-copy-id -i "${RHIS_INSTALLER_SSH_PUBLIC_KEY}" \
-                        -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 \
-                        "${admin_user}@${push_ip}" >/dev/null 2>&1 || true
-                fi
-                if [ -n "${pub_b64}" ]; then
-                    append_admin_cmd="target_home=\"\$(getent passwd '${admin_user}' | cut -d: -f6)\"; [ -n \"\$target_home\" ] || target_home=\"/home/${admin_user}\"; install -d -m 700 -o '${admin_user}' -g '${admin_user}' \"\$target_home/.ssh\"; touch \"\$target_home/.ssh/authorized_keys\"; printf '%s' '${pub_b64}' | base64 -d >> \"\$target_home/.ssh/authorized_keys\"; sort -u \"\$target_home/.ssh/authorized_keys\" -o \"\$target_home/.ssh/authorized_keys\"; chown '${admin_user}:${admin_user}' \"\$target_home/.ssh/authorized_keys\"; chmod 600 \"\$target_home/.ssh/authorized_keys\""
-                    if [ -n "${installer_pass}" ]; then
-                        sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${admin_user}@${push_ip}" "$append_admin_cmd" >/dev/null 2>&1 || true
-                    fi
-                    if [ -n "${root_pass}" ]; then
-                        sshpass -p "${root_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "root@${push_ip}" "$append_admin_cmd" >/dev/null 2>&1 || true
-                    fi
-                fi
-            fi
 
             # install-host key -> root
             if command -v ssh-copy-id >/dev/null 2>&1 && [ -n "${root_pass}" ]; then
@@ -8896,7 +8865,7 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
                 sshpass -p "${root_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "root@${push_ip}" "$append_root_cmd" >/dev/null 2>&1 || true
             fi
 
-            print_step "Install-host key synchronized to ${installer_user}/${admin_user}/root on ${push_name} (${push_ip})"
+            print_step "Install-host key synchronized to root on ${push_name} (${push_ip})"
         done
     fi
 
@@ -8907,8 +8876,8 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
             pub="$(sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" 'cat /root/.ssh/id_rsa.pub' 2>/dev/null || true)"
         fi
         if [ -z "$pub" ] && [ -n "${installer_pass}" ]; then
-            pub="$(sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" "${read_root_pub_via_admin_cmd}" 2>/dev/null || true)"
-            [ -n "$pub" ] && print_step "Collected root SSH public key from ${ip} via ${installer_user} + sudo fallback."
+            pub="$(sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" "${read_root_pub_via_mesh_cmd}" 2>/dev/null || true)"
+            [ -n "$pub" ] && print_step "Collected root SSH public key from ${ip} via ${mesh_user} + sudo fallback."
         fi
         if [ -z "$pub" ]; then
             print_warning "Could not read root SSH public key from ${ip}."
@@ -8929,10 +8898,10 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
                 append_root_cmd="printf '%s\\n' '$pub' >> /root/.ssh/authorized_keys; sort -u /root/.ssh/authorized_keys -o /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys"
                 if [ -n "$root_pass" ] && sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$ip" "$append_root_cmd" >/dev/null 2>&1; then
                     :
-                elif [ -n "${installer_pass}" ] && sshpass -p "${installer_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${installer_user}@${ip}" "sudo -n bash -lc '$(printf '%s' "${append_root_cmd}" | sed "s/'/'\\''/g")'" >/dev/null 2>&1; then
+                elif [ -n "${mesh_pass}" ] && sshpass -p "${mesh_pass}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 "${mesh_user}@${ip}" "sudo -n bash -lc '$(printf '%s' "${append_root_cmd}" | sed "s/'/'\\''/g")'" >/dev/null 2>&1; then
                     :
                 else
-                    print_warning "Failed to distribute root SSH key to ${ip} via direct root and ${installer_user} + sudo fallback."
+                    print_warning "Failed to distribute root SSH key to ${ip} via direct root and ${mesh_user} + sudo fallback."
                     if [ "${root_mesh_required}" -eq 1 ]; then
                         return 1
                     fi
@@ -8954,15 +8923,15 @@ chown "$target_user:$target_user" "$target_home/.ssh/config"; chmod 600 "$target
     fi
 
     if [ "${root_mesh_failures}" -gt 0 ]; then
-        print_warning "RHIS SSH mesh configured with ${root_mesh_failures} root-mesh issue(s). Installer-user mesh is active; root mesh is best-effort."
+        print_warning "RHIS SSH mesh configured with ${root_mesh_failures} root-mesh issue(s). Admin mesh is active; root mesh is best-effort."
     else
-        print_success "RHIS SSH mesh configured: ${installer_user} and root SSH trust established across install host + all RHIS nodes."
+        print_success "RHIS SSH mesh configured: ${mesh_user} and root SSH trust established across RHIS nodes; install-host user key is trusted by root on each node."
     fi
     return 0
 }
 
 validate_rhis_ssh_mesh() {
-    local root_pass installer_user installer_pass
+    local root_pass installer_user installer_pass mesh_user mesh_pass
     local src_name src_ip dst_name dst_ip
     local validation_cmd
     local failures=0
@@ -8971,8 +8940,10 @@ validate_rhis_ssh_mesh() {
     root_pass="${ROOT_PASS:-${ADMIN_PASS:-}}"
     installer_user="${INSTALLER_USER:-${ADMIN_USER}}"
     installer_pass="${ADMIN_PASS:-}"
+    mesh_user="${ADMIN_USER:-admin}"
+    mesh_pass="${ADMIN_PASS:-}"
     if [ -z "$installer_pass" ] && [ -z "$root_pass" ]; then
-        print_warning "Cannot validate SSH mesh: installer/admin and root passwords are both unset."
+        print_warning "Cannot validate SSH mesh: admin and root passwords are both unset."
         return 1
     fi
 
@@ -8982,20 +8953,20 @@ validate_rhis_ssh_mesh() {
         "${IDM_HOSTNAME}:${IDM_IP}"
     )
 
-    print_step "Validating RHIS SSH mesh (${installer_user}-to-${installer_user} key auth across all nodes)"
+    print_step "Validating RHIS SSH mesh (${mesh_user}-to-${mesh_user} key auth across all nodes)"
     for src in "${node_specs[@]}"; do
         src_name="${src%%:*}"
         src_ip="${src##*:}"
         for dst in "${node_specs[@]}"; do
             dst_name="${dst%%:*}"
             dst_ip="${dst##*:}"
-            validation_cmd="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 ${installer_user}@${dst_ip} 'echo ok:${dst_name}'"
+            validation_cmd="ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 ${mesh_user}@${dst_ip} 'echo ok:${dst_name}'"
             # Try with RHIS installer key first (installer host key is pushed to each node's authorized_keys
-            # during mesh setup, so key auth works even when installer_user has no password on the VMs).
+            # during mesh setup to root only, so this path is typically not used for node-to-node admin mesh.
             if [ -f "${RHIS_INSTALLER_SSH_PRIVATE_KEY:-}" ] && \
-               ssh -i "${RHIS_INSTALLER_SSH_PRIVATE_KEY}" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ${installer_user}@"$src_ip" "$validation_cmd" >/dev/null 2>&1; then
+               ssh -i "${RHIS_INSTALLER_SSH_PRIVATE_KEY}" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ${mesh_user}@"$src_ip" "$validation_cmd" >/dev/null 2>&1; then
                 print_step "SSH mesh OK: ${src_name} -> ${dst_name}"
-            elif [ -n "$installer_pass" ] && sshpass -p "$installer_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ${installer_user}@"$src_ip" "$validation_cmd" >/dev/null 2>&1; then
+            elif [ -n "$mesh_pass" ] && sshpass -p "$mesh_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 ${mesh_user}@"$src_ip" "$validation_cmd" >/dev/null 2>&1; then
                 print_step "SSH mesh OK: ${src_name} -> ${dst_name}"
             elif [ -n "$root_pass" ] && sshpass -p "$root_pass" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 root@"$src_ip" "$validation_cmd" >/dev/null 2>&1; then
                 print_step "SSH mesh OK via root fallback: ${src_name} -> ${dst_name}"
@@ -9030,7 +9001,7 @@ validate_rhis_ssh_mesh() {
         return 1
     fi
 
-    print_success "SSH mesh validation complete: installer and root SSH trust is functional across RHIS nodes."
+    print_success "SSH mesh validation complete: admin and root SSH trust is functional across RHIS nodes."
     return 0
 }
 
