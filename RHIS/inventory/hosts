@@ -11,6 +11,7 @@
 #   [ansibledev]        the KVM host / controller running this script
 #   [libvirt]           same host when using the libvirt platform
 #   [installer]         same as ansibledev for most deployments
+#   [rhis_nodes]        compatibility alias for all managed nodes
 #   [scenario_satellite] the Satellite VM
 #   [sat_primary]       alias expected by rhis-builder-satellite
 #   [aap]               the AAP VM
@@ -35,6 +36,11 @@ kaso.prod.spg
 kaso.prod.spg ansible_host=192.168.122.1 ansible_user=admin ansible_become=true
 
 # ─── Managed nodes ────────────────────────────────────────────────────────────
+[rhis_nodes:children]
+scenario_satellite
+aap
+idm
+
 [scenario_satellite]
 satellite.prod.spg ansible_host=10.168.128.1 ansible_user=admin ansible_become=true
 

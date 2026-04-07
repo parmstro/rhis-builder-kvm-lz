@@ -14,11 +14,19 @@
       redhat.satellite.partition_table:
         name: "{{ item.name }}"
         os_family: "{{ item.os_family }}"
-        snippet: "{{ item.snippet | default(false) }}"
-        layout: "{{ lookup('file', item.file) }}"
+        layout: "{{ (_ptable_layout | trim | length > 0) | ternary(_ptable_layout,
+          item.layout | default(rhis_sat_config_partition_table_default_layout))
+          }}"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
         state: present
       loop: "{{ rhis_sat_config_partition_tables }}"
-      no_log: true
+      vars:
+        _ptable_layout: "{{ lookup('file', item.file, errors='ignore') if (item.file is
+          defined) else '' }}"
+      no_log: false
       tags:
         - tags_sat_config_provisioning
 
@@ -49,21 +57,66 @@
       tags:
         - tags_sat_config_provisioning
 
+    - name: "Discover local smart proxy capabilities"
+      redhat.satellite.resource_info:
+        resource: smart_proxies
+        search: "name={{ sat_hostname | default('satellite.prod.spg') }}"
+      register: _sat_proxy_info
+      no_log: false
+      tags:
+        - tags_sat_config_provisioning
+
+    - name: "Compute available smart proxy features"
+      ansible.builtin.set_fact:
+        _sat_proxy_features_lc: >-
+          {{
+            (
+              (_sat_proxy_info.resources | default([]) | first | default({})).features
+              | default([])
+              | map(attribute='name')
+              | map('lower')
+              | list
+            )
+          }}
+      tags:
+        - tags_sat_config_provisioning
+
+    - name: "Warn about missing smart proxy features"
+      ansible.builtin.debug:
+        msg: >-
+          Satellite smart proxy is missing features needed for full PXE stack:
+          {{ (['dns', 'dhcp', 'tftp'] | difference(_sat_proxy_features_lc |
+          default([]))) | join(', ') }}
+      when: (['dns', 'dhcp', 'tftp'] | difference(_sat_proxy_features_lc |
+        default([])) | length) > 0
+      changed_when: false
+      tags:
+        - tags_sat_config_provisioning
+
     - name: "Ensure provisioning subnet: Provisioning_Net"
       redhat.satellite.subnet:
         name: "Provisioning_Net"
         network: "{{ rhis_sat_config_provisioning_net }}"
         mask: "{{ rhis_sat_config_provisioning_mask }}"
         gateway: "{{ rhis_sat_config_sat_ip }}"
-        dns_primary: "{{ rhis_sat_config_sat_ip }}"
-        ipam: "DHCP"
-        boot_mode: "DHCP"
-        from_ip: "{{ rhis_sat_config_dhcp_from }}"
-        to_ip: "{{ rhis_sat_config_dhcp_to }}"
-        dhcp_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
-        dns_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
-        tftp_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
-        discovery_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
+        dns_primary: "{{ rhis_sat_config_sat_ip if ('dns' in (_sat_proxy_features_lc |
+          default([]))) else omit }}"
+        ipam: "{{ 'DHCP' if ('dhcp' in (_sat_proxy_features_lc | default([]))) else
+          'None' }}"
+        boot_mode: "{{ 'DHCP' if ('dhcp' in (_sat_proxy_features_lc | default([]))) else
+          omit }}"
+        from_ip: "{{ rhis_sat_config_dhcp_from if ('dhcp' in (_sat_proxy_features_lc |
+          default([]))) else omit }}"
+        to_ip: "{{ rhis_sat_config_dhcp_to if ('dhcp' in (_sat_proxy_features_lc |
+          default([]))) else omit }}"
+        dhcp_proxy: "{{ (sat_hostname | default('satellite.prod.spg')) if ('dhcp' in
+          (_sat_proxy_features_lc | default([]))) else omit }}"
+        dns_proxy: "{{ (sat_hostname | default('satellite.prod.spg')) if ('dns' in
+          (_sat_proxy_features_lc | default([]))) else omit }}"
+        tftp_proxy: "{{ (sat_hostname | default('satellite.prod.spg')) if ('tftp' in
+          (_sat_proxy_features_lc | default([]))) else omit }}"
+        discovery_proxy: "{{ (sat_hostname | default('satellite.prod.spg')) if ('tftp'
+          in (_sat_proxy_features_lc | default([]))) else omit }}"
         domains:
           - "{{ rhis_sat_config_domain }}"
         organizations:
@@ -71,6 +124,6 @@
         locations:
           - "{{ satellite_location }}"
         state: present
-      no_log: true
+      no_log: false
       tags:
         - tags_sat_config_provisioning

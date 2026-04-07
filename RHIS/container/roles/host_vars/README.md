@@ -1,57 +1,30 @@
-# host_vars/
+# host_vars — Per-Host Ansible Variables
 
-This directory is bind-mounted into the `rhis-provisioner` container at  
-`/rhis/vars/host_vars/`.
+These files are **auto-generated** by `MiniRHIS.sh` (`generate_minirhis_host_vars()`)
+during initial setup or reconfiguration and placed here so Ansible discovers
+them when using the top-level inventory.
 
-## Setup
+## Git tracking
 
-Copy each `*.SAMPLE` file to its actual name (removing `.SAMPLE`) and fill in  
-real values before running any rhis-builder playbook:
+Only `*.SAMPLE` files are tracked in git — they contain commented-out examples
+and serve as documentation for what each variable does.
 
-```text
-host_vars/satellite.yml   — Satellite VM connection + org/location vars
-host_vars/satellite_content_profile.yml — persistent Satellite content/lifecycle/CV/AK profile
-host_vars/aap.yml         — AAP admin credentials
-host_vars/idm.yml         — IdM realm/domain overrides
-host_vars/installer.yml   — Controller/installer host SSH settings
-```
+Generated working copies (e.g., `aap.yml`, `satellite.yml`, `idm.yml`) are
+excluded by `.gitignore` — they contain your lab-specific hostnames, IPs, and
+vault references.
 
-## Secrets
+## Usage
 
-Sensitive values (passwords, tokens) **must not** be stored in plain text.  
-Reference them from your Ansible vault instead:
+1. Run `./MiniRHIS.sh --reconfigure` to (re)generate all host_vars files from
+   your `~/.ansible/conf/env.yml`.
+2. Review the SAMPLE files to understand available variables.
+3. Do NOT commit the generated files — they contain deployment-specific secrets.
 
-```yaml
-ansible_password: "{{ global_admin_password | default('') }}"
-```
+## File index
 
-Store the vault at `~/.ansible/conf/env.yml` (encrypted with `ansible-vault`).  
-See `CHECKLIST.md` in the repo root for the full secret checklist.
-
-## Runtime behavior note
-
-`MiniRHIS.sh` regenerates `host_vars/*.yml` during config-as-code startup.
-Treat these files as generated runtime artifacts; if you need persistent changes,
-set values in the vaulted env source (`~/.ansible/conf/env.yml`) instead of editing
-generated files directly.
-
-Current generated Satellite host_vars defaults include:
-
-- `satellite_pre_use_idm` (default-safe behavior is `false` unless explicitly enabled)
-- `ipa_client_dns_servers`
-- `ipa_server_fqdn`
-- Satellite/Foreman/Hammer username sourced from prompted `ADMIN_USER`
-- Satellite password sourced from vaulted `sat_admin_pass` / `global_admin_password`
-
-The supplemental file `satellite_content_profile.yml` is intended for persistent
-Satellite content configuration that should survive generator reruns, such as:
-
-- lifecycle environments
-- content views
-- activation keys
-- repository intent/profile settings
-
-RHIS dependency order remains:
-
-- Build/create: `IdM -> Satellite -> AAP`
-- Config-as-code: `IdM -> Satellite -> AAP`
+| File                      | Purpose                                      |
+| ------------------------- | -------------------------------------------- |
+| `aap.yml.SAMPLE`          | AAP Controller + Hub + Gateway variables     |
+| `idm.yml.SAMPLE`          | Red Hat IdM / FreeIPA variables              |
+| `satellite.yml.SAMPLE`    | Red Hat Satellite variables                  |
+| `installer.yml.SAMPLE`    | Installer host (KVM controller) variables    |

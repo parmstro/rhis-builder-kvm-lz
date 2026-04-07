@@ -47,11 +47,12 @@
   become: true
   ignore_errors: true
 
-- name: Allow SSH through firewalld on RHIS VMs
+- name: Allow RHIS web and SSH services through firewalld on RHIS VMs
   ansible.posix.firewalld:
-    service: ssh
+    service: "{{ item }}"
     permanent: true
     immediate: true
     state: enabled
+  loop: "{{ rhis_firewalld_services }}"
   become: true
   ignore_errors: true

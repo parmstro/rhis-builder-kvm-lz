@@ -124,6 +124,9 @@ MINIRHIS_MANAGED_SSH_OVER_ETH0="0"
 # IdM web UI readiness check after IdM configuration phase.
 MINIRHIS_IDM_WEB_UI_TIMEOUT="${MINIRHIS_IDM_WEB_UI_TIMEOUT:-900}"
 MINIRHIS_IDM_WEB_UI_INTERVAL="${MINIRHIS_IDM_WEB_UI_INTERVAL:-15}"
+# Keep MINIRHIS service hostnames pinned to internal 10.168.x.x addresses.
+# External/NAT host mappings can be enabled explicitly for diagnostics.
+MINIRHIS_SYNC_EXTERNAL_HOSTS="${MINIRHIS_SYNC_EXTERNAL_HOSTS:-0}"
 # Post-install healthcheck/repair controls.
 MINIRHIS_ENABLE_POST_HEALTHCHECK="${MINIRHIS_ENABLE_POST_HEALTHCHECK:-1}"
 MINIRHIS_HEALTHCHECK_AUTOFIX="${MINIRHIS_HEALTHCHECK_AUTOFIX:-1}"
@@ -159,7 +162,8 @@ HUB_TOKEN="${HUB_TOKEN:-}"
 # Automation Hub API token used for [galaxy_server.*] in minirhis-ansible.cfg.
 # If unset, HUB_TOKEN is used as fallback.
 VAULT_CONSOLE_REDHAT_TOKEN="${VAULT_CONSOLE_REDHAT_TOKEN:-}"
-HOST_INT_IP="${HOST_INT_IP:-192.168.122.1}"
+# Populated by normalize_shared_env_vars; must stay on 10.168.x.x internal network.
+HOST_INT_IP="${HOST_INT_IP:-}"
 AAP_BUNDLE_URL="${AAP_BUNDLE_URL:-}"
 AAP_BUNDLE_EFFECTIVE_URL="${AAP_BUNDLE_EFFECTIVE_URL:-}"
 AAP_BUNDLE_DIR="${AAP_BUNDLE_DIR:-${VM_DIR}/aap-bundle}"
@@ -1237,7 +1241,7 @@ kickstart_runtime_exports_block() {
     rh_user_q="$(printf '%q' "${RH_USER}")"
     rh_pass_q="$(printf '%q' "${RH_PASS}")"
     domain_q="$(printf '%q' "${DOMAIN:-}")"
-    host_int_ip_q="$(printf '%q' "${HOST_INT_IP:-192.168.122.1}")"
+    host_int_ip_q="$(printf '%q' "${HOST_INT_IP:-10.168.0.1}")"
     defer_component_install_q="$(printf '%q' "${MINIRHIS_DEFER_COMPONENT_INSTALL:-1}")"
     minirhis_temp_rc_local_q="$(printf '%q' "${MINIRHIS_TEMP_ENABLE_RC_LOCAL_EXEC:-1}")"
     cockpit_port_q="$(printf '%q' "${COCKPIT_PORT:-9443}")"
@@ -2731,6 +2735,7 @@ normalize_shared_env_vars() {
     INTERNAL_NETWORK="${INTERNAL_NETWORK:-10.168.0.0}"
     NETMASK="${NETMASK:-${SAT_NETMASK:-${AAP_NETMASK:-${IDM_NETMASK:-255.255.0.0}}}}"
     INTERNAL_GW="${INTERNAL_GW:-${SAT_GW:-${AAP_GW:-${IDM_GW:-$(derive_gateway_from_network "${INTERNAL_NETWORK}")}}}}"
+    HOST_INT_IP="${HOST_INT_IP:-${INTERNAL_GW:-10.168.0.1}}"
 
     SAT_IP="${SAT_IP:-10.168.128.1}"
     AAP_IP="${AAP_IP:-10.168.128.2}"
@@ -2746,6 +2751,7 @@ normalize_shared_env_vars() {
     case "${SAT_IP}" in 10.168.*) ;; *) print_warning "SAT_IP='${SAT_IP}' is outside 10.168.x.x; resetting to 10.168.128.1."; SAT_IP="10.168.128.1" ;; esac
     case "${AAP_IP}" in 10.168.*) ;; *) print_warning "AAP_IP='${AAP_IP}' is outside 10.168.x.x; resetting to 10.168.128.2."; AAP_IP="10.168.128.2" ;; esac
     case "${IDM_IP}" in 10.168.*) ;; *) print_warning "IDM_IP='${IDM_IP}' is outside 10.168.x.x; resetting to 10.168.128.3."; IDM_IP="10.168.128.3" ;; esac
+    case "${HOST_INT_IP}" in 10.168.*) ;; *) print_warning "HOST_INT_IP='${HOST_INT_IP}' is outside 10.168.x.x; resetting to ${INTERNAL_GW:-10.168.0.1}."; HOST_INT_IP="${INTERNAL_GW:-10.168.0.1}" ;; esac
 
     SAT_ORG="${SAT_ORG:-REDHAT}"
     SAT_LOC="${SAT_LOC:-CORE}"
@@ -4027,7 +4033,13 @@ show_live_status_dashboard() {
         ls -lt /tmp/aap-setup-*.log 2>/dev/null | head -5 || echo "(no AAP callback log yet)"
         echo ""
 
-        sat_ip="$(sudo -n virsh domifaddr satellite 2>/dev/null | awk '/ipv4/ {print $4}' | cut -d/ -f1 | head -1 || true)"
+        sat_ip="${SAT_IP:-}"
+        if [ -z "$sat_ip" ]; then
+            sat_ip="$(sudo -n virsh domifaddr satellite 2>/dev/null | awk '/ipv4/ {print $4}' | cut -d/ -f1 | awk '$1 ~ /^10\.168\./ {print; exit}' || true)"
+        fi
+        if [ -z "$sat_ip" ]; then
+            sat_ip="$(sudo -n virsh domifaddr satellite 2>/dev/null | awk '/ipv4/ {print $4}' | cut -d/ -f1 | head -1 || true)"
+        fi
         if [ -n "$sat_ip" ]; then
             if timeout 2 bash -lc "cat < /dev/tcp/${sat_ip}/18080" >/dev/null 2>&1; then
                 cmdb_status="OPEN"
@@ -4791,7 +4803,7 @@ import re
 
 root = pathlib.Path("/minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks")
 if not root.exists():
-    print("MISSING_TASKS_DIR")
+    print("UPDATED=0")
     raise SystemExit(0)
 
 updated = 0
@@ -4983,6 +4995,16 @@ sync_local_roles_to_container() {
     local local_roles_dir="${SCRIPT_DIR}/container/roles"
     local tree sync_failed=0
     local rel_file
+    local extra_role_dir
+    local -a extra_role_dirs=(
+        "minirhis_sat_config"
+        "minirhis_host_setup"
+        "minirhis_hosts_sync"
+        "minirhis_ssh_mesh"
+        "minirhis_vm_hardening"
+        "minirhis_vm_lifecycle"
+        "minirhis_installer"
+    )
     local -a top_level_assets=(
         "ansible.cfg"
         "requirements.txt"
@@ -5004,6 +5026,21 @@ sync_local_roles_to_container() {
         else
             print_warning "  failed to sync: ${tree}"
             sync_failed=1
+        fi
+    done
+
+    # Keep shared non-builder role trees in sync as they are included by the
+    # compatibility builder playbooks (for example minirhis_sat_config).
+    for extra_role_dir in "${extra_role_dirs[@]}"; do
+        if [ -d "${local_roles_dir}/${extra_role_dir}" ]; then
+            podman exec "${MINIRHIS_CONTAINER_NAME}" mkdir -p "/minirhis/${extra_role_dir}" >/dev/null 2>&1 || true
+            if podman cp "${local_roles_dir}/${extra_role_dir}/." \
+                   "${MINIRHIS_CONTAINER_NAME}:/minirhis/${extra_role_dir}/" >/dev/null 2>&1; then
+                print_step "  synced: ${extra_role_dir}"
+            else
+                print_warning "  failed to sync: ${extra_role_dir}"
+                sync_failed=1
+            fi
         fi
     done
 
@@ -5031,7 +5068,7 @@ sync_local_roles_to_container() {
 }
 
 apply_managed_container_patches() {
-    local _verify_cmd='test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/templates/chrony.j2 && test -f /minirhis/minirhis-builder-idm/roles/idm_pre/templates/chrony.j2 && grep -q "failed_when: false" /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml && grep -q "disable_gpg_check: true" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "exclude: \"intel-audio-firmware\\*\"" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml'
+    local _verify_cmd='test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/templates/chrony.j2 && test -f /minirhis/minirhis-builder-idm/roles/idm_pre/templates/chrony.j2 && { ! test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml || grep -q "failed_when: false" /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml; } && grep -q "disable_gpg_check: true" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "exclude: \"intel-audio-firmware\\*\"" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml'
 
     if ! is_enabled "${MINIRHIS_ENABLE_CONTAINER_HOTFIXES:-1}"; then
         print_step "Managed container patches disabled (MINIRHIS_ENABLE_CONTAINER_HOTFIXES=${MINIRHIS_ENABLE_CONTAINER_HOTFIXES})."
@@ -5953,9 +5990,11 @@ sync_minirhis_external_hosts_entries() {
         return 0
     }
 
-    if ! command -v virsh >/dev/null 2>&1; then
-        print_warning "Skipping /etc/hosts external-entry sync: virsh not found."
-        return 0
+    if is_enabled "${MINIRHIS_SYNC_EXTERNAL_HOSTS:-0}"; then
+        if ! command -v virsh >/dev/null 2>&1; then
+            print_warning "Skipping /etc/hosts external-entry sync: virsh not found."
+            return 0
+        fi
     fi
 
     for spec in "${specs[@]}"; do
@@ -5967,6 +6006,10 @@ sync_minirhis_external_hosts_entries() {
         # Keep controller /etc/hosts populated with MINIRHIS internal addresses.
         row="$(_build_hosts_row "${internal_ip}" "${fqdn}" "${alias}" 2>/dev/null || true)"
         [ -n "${row}" ] && rows_internal+=("${row}")
+
+        if ! is_enabled "${MINIRHIS_SYNC_EXTERNAL_HOSTS:-0}"; then
+            continue
+        fi
 
         ext_ip="$(sudo -n virsh domifaddr "${vm}" 2>/dev/null | awk '/ipv4/ {print $4}' | cut -d/ -f1 | awk '$1 !~ /^10\.168\./ {print; exit}' || true)"
         [ -n "${ext_ip}" ] || continue
@@ -6606,7 +6649,7 @@ HUB_TOKEN="${AAP_HUB_TOKEN:-}"
 # =============================================================================
 # NETWORK CONFIGURATION  (optional — auto-detected when empty)
 # =============================================================================
-HOST_INT_IP="192.168.122.1"         # KVM NAT bridge IP on the installer host
+HOST_INT_IP="10.168.0.1"            # MINIRHIS internal bridge IP on the installer host
 # INTERNAL_NETWORK="10.168.0.0"
 # NETMASK="255.255.0.0"
 # INTERNAL_GW="10.168.0.1"
@@ -6777,7 +6820,7 @@ generate_minirhis_inventory() {
     [ -f "${template_file}" ] || template_file="${SCRIPT_DIR}/inventory/hosts.SAMPLE"
     tmp_hosts="$(mktemp "${ANSIBLE_ENV_DIR}/.hosts.XXXXXX")" || return 1
     controller_host_e="$(sed_escape_replacement "${controller_host}")"
-    host_int_ip_e="$(sed_escape_replacement "${HOST_INT_IP:-192.168.122.1}")"
+    host_int_ip_e="$(sed_escape_replacement "${HOST_INT_IP:-10.168.0.1}")"
     installer_user_e="$(sed_escape_replacement "${INSTALLER_USER:-${ADMIN_USER:-admin}}")"
     sat_host_e="$(sed_escape_replacement "${SAT_HOSTNAME:-satellite}")"
     sat_alias_e="$(sed_escape_replacement "${SAT_ALIAS:-satellite}")"
@@ -6821,7 +6864,12 @@ ${controller_host}
 ${controller_host}
 
 [installer]
-${controller_host} ansible_host=${HOST_INT_IP:-192.168.122.1} ansible_user=${INSTALLER_USER:-${USER}} ansible_become=true
+${controller_host} ansible_host=${HOST_INT_IP:-10.168.0.1} ansible_user=${INSTALLER_USER:-${USER}} ansible_become=true
+
+[rhis_nodes:children]
+scenario_satellite
+aap
+idm
 
 [scenario_satellite]
 ${SAT_HOSTNAME:-satellite} ansible_host=${sat_connect_host} ansible_user=${ADMIN_USER:-admin} ansible_become=true
@@ -7388,6 +7436,22 @@ satellite-installer --scenario satellite \
   --foreman-initial-location \"${SAT_LOC:-CORE}\" \
   --foreman-initial-admin-username ${admin_user_q} \
   --foreman-initial-admin-password ${admin_pass_q} \
+    --foreman-proxy-http true \
+    --foreman-proxy-templates true \
+    --foreman-proxy-dhcp true \
+    --foreman-proxy-dhcp-interface "${SAT_PROVISIONING_INTERFACE:-eth1}" \
+    --foreman-proxy-dhcp-managed true \
+    --foreman-proxy-dhcp-gateway "${SAT_PROVISIONING_GW:-${INTERNAL_GW:-10.168.0.1}}" \
+    --foreman-proxy-dhcp-nameservers "${SAT_PROVISIONING_DNS_PRIMARY:-${SAT_IP:-10.168.128.1}}" \
+    --foreman-proxy-dhcp-range "${SAT_PROVISIONING_DHCP_START:-10.168.130.1} ${SAT_PROVISIONING_DHCP_END:-10.168.255.254}" \
+    --foreman-proxy-tftp true \
+    --foreman-proxy-tftp-managed true \
+    --foreman-proxy-tftp-servername "${SAT_IP:-10.168.128.1}" \
+    --enable-foreman-plugin-remote-execution \
+    --enable-foreman-proxy-plugin-remote-execution-ssh \
+    --enable-foreman-compute-libvirt \
+    --enable-foreman-plugin-openscap \
+    --enable-foreman-proxy-plugin-openscap \
   --enable-foreman-plugin-ansible \
     --enable-foreman-proxy-plugin-ansible"
 
@@ -7965,7 +8029,7 @@ else:
 
     ensure_container_playbook_hotfixes() {
         local _scope="${MINIRHIS_COMPONENT_SCOPE:-all}"
-        local _verify_cmd='test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/templates/chrony.j2 && test -f /minirhis/minirhis-builder-idm/roles/idm_pre/templates/chrony.j2 && grep -q "failed_when: false" /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml && grep -q "disable_gpg_check: true" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "exclude: \"intel-audio-firmware\\*\"" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "Check Satellite API endpoint readiness (hard gate)" /minirhis/minirhis-builder-satellite/tasks/configure_hammer.yml && grep -q "vars\['"'"'ansible_roles_import_list'"'"'\]" /minirhis/minirhis-builder-satellite/tasks/ensure_import_roles.yml && grep -q "Ensure local Satellite proxy has TFTP enabled in Foreman" /minirhis/minirhis-builder-satellite/tasks/build_pxe_linux_defaults.yml && test -f /minirhis/minirhis-builder-satellite/tasks/ensure_local_tftp_proxy.yml && test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/ensure_packages_unlock.yml'
+        local _verify_cmd='test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/templates/chrony.j2 && test -f /minirhis/minirhis-builder-idm/roles/idm_pre/templates/chrony.j2 && { ! test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml || grep -q "failed_when: false" /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/is_satellite_installed.yml; } && grep -q "disable_gpg_check: true" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "exclude: \"intel-audio-firmware\\*\"" /minirhis/minirhis-builder-idm/roles/idm_pre/tasks/ensure_update_system.yml && grep -q "Check Satellite API endpoint readiness (hard gate)" /minirhis/minirhis-builder-satellite/tasks/configure_hammer.yml && grep -q "vars\['"'"'ansible_roles_import_list'"'"'\]" /minirhis/minirhis-builder-satellite/tasks/ensure_import_roles.yml && grep -q "Ensure local Satellite proxy has TFTP enabled in Foreman" /minirhis/minirhis-builder-satellite/tasks/build_pxe_linux_defaults.yml && test -f /minirhis/minirhis-builder-satellite/tasks/ensure_local_tftp_proxy.yml && test -f /minirhis/minirhis-builder-satellite/roles/satellite_pre/tasks/ensure_packages_unlock.yml'
         local _verified=1
 
         print_step "Pre-flight: applying container role hotfixes"
@@ -7976,10 +8040,18 @@ else:
         # New hotfixes applied during troubleshooting (MiniRHIS fixes):
         run_repo_hotfixes || true
 
-        # AAP-only runs do not execute Satellite/IdM playbooks, so do not block
-        # the workflow on unrelated hotfix verification gates.
+        # Component-scoped runs skip unrelated hotfix gates to avoid blocking on
+        # files/paths that only exist when the full set of builders is present.
         if [ "${_scope}" = "aap" ]; then
             print_step "Container hotfix verification: AAP-only scope detected; skipping Satellite/IdM gate checks."
+            return 0
+        fi
+        if [ "${_scope}" = "idm" ]; then
+            print_step "Container hotfix verification: IdM-only scope detected; skipping Satellite gate checks."
+            return 0
+        fi
+        if [ "${_scope}" = "satellite" ]; then
+            print_step "Container hotfix verification: Satellite-only scope detected; skipping cross-component legacy gate checks."
             return 0
         fi
 
@@ -9177,7 +9249,7 @@ bash tools/hammer_api_fallback.sh compute_resources 'name=\"Libvirt_Prod_Server\
         local timeout interval start_ts now elapsed
         local rc=0
         local check_out=""
-        local remediate_shell='systemctl enable --now chronyd >/dev/null 2>&1 || true; systemctl enable --now httpd >/dev/null 2>&1 || true; ipactl status >/dev/null 2>&1 || ipactl start >/dev/null 2>&1 || true; systemctl restart httpd pki-tomcatd@pki-tomcat >/dev/null 2>&1 || true; curl -k -sS -o /dev/null -w "HTTP %{http_code}\\n" https://localhost/ipa/ui/ || true'
+        local remediate_shell='systemctl enable --now chronyd >/dev/null 2>&1 || true; systemctl enable --now firewalld >/dev/null 2>&1 || true; firewall-cmd --permanent --add-service=https >/dev/null 2>&1 || true; firewall-cmd --permanent --add-service=cockpit >/dev/null 2>&1 || true; firewall-cmd --reload >/dev/null 2>&1 || true; systemctl enable --now httpd >/dev/null 2>&1 || true; ipactl status >/dev/null 2>&1 || ipactl start >/dev/null 2>&1 || true; systemctl restart httpd pki-tomcatd@pki-tomcat >/dev/null 2>&1 || true; curl -k -sS -o /dev/null -w "HTTP %{http_code}\\n" https://localhost/ipa/ui/ || true'
         local check_shell='code="$(curl -k -sS -o /dev/null -w "%{http_code}" https://localhost/ipa/ui/ 2>/dev/null || true)"; ss -ltn | grep -q ":443\\b" || exit 1; case "$code" in 200|301|302|303|307|308|401|403) echo "IDM_WEB_UI_READY:$code" ;; *) echo "IDM_WEB_UI_NOT_READY:$code"; exit 1 ;; esac'
 
         timeout="${MINIRHIS_IDM_WEB_UI_TIMEOUT:-900}"
@@ -9493,8 +9565,14 @@ bash tools/hammer_api_fallback.sh compute_resources 'name=\"Libvirt_Prod_Server\
         print_manual_rerun_template "aap"
     else
         aap_auth_fallback_status="${phase_auth_fallback_status}"
-        aap_status="success"
-        print_success "AAP configuration complete."
+        if wait_for_aap_api "${AAP_IP}" "${AAP_ADMIN_PASS:-${ADMIN_PASS:-}}"; then
+            aap_status="success"
+            print_success "AAP configuration complete."
+        else
+            aap_status="failed-webui"
+            any_failed=1
+            print_warning "AAP phase completed but API/Web readiness gate failed."
+        fi
     fi
     print_step "Auth fallback (AAP): ${aap_auth_fallback_status}"
     else
@@ -9769,8 +9847,8 @@ bash tools/hammer_api_fallback.sh compute_resources 'name=\"Libvirt_Prod_Server\
             print_step "Skipping Satellite post-install healthcheck (component scope: ${component_scope})."
         fi
 
-        local aap_check='(ss -ltn | grep -q ":443\\b" || ss -ltn | grep -q ":80\\b"); code="$(curl -k -sS -o /dev/null -w "%{http_code}" https://localhost/ 2>/dev/null || true)"; [ "$code" != "000" ] || code="$(curl -sS -o /dev/null -w "%{http_code}" http://localhost/ 2>/dev/null || true)"; case "$code" in 200|301|302|303|307|308|401|403) echo "AAP_HEALTH_OK:$code" ;; *) echo "AAP_HEALTH_BAD:$code"; exit 1 ;; esac'
-        local aap_fix='systemctl enable --now podman >/dev/null 2>&1 || true; systemctl restart podman >/dev/null 2>&1 || true; true'
+        local aap_check='ss -ltn | grep -q ":443\\b"; curl -k -sS https://localhost/api/v2/ping/ 2>/dev/null | grep -q '"'"'version'"'"'; echo "AAP_HEALTH_OK:api-v2-ping"'
+        local aap_fix='systemctl enable --now firewalld >/dev/null 2>&1 || true; firewall-cmd --permanent --add-service=https >/dev/null 2>&1 || true; firewall-cmd --permanent --add-service=cockpit >/dev/null 2>&1 || true; firewall-cmd --reload >/dev/null 2>&1 || true; systemctl enable --now podman >/dev/null 2>&1 || true; systemctl restart podman >/dev/null 2>&1 || true; systemctl enable --now cockpit.socket >/dev/null 2>&1 || true; true'
 
         if [ "${aap_status}" = "success" ] || [ "${aap_status}" = "success-after-retry" ]; then
             if healthcheck_run_shell "aap" "AAP web/service readiness" "${aap_check}"; then
@@ -10525,7 +10603,7 @@ prompt_all_env_options_once() {
     prompt_with_default RH9_ISO_URL "RHEL 9 ISO URL (Satellite)" "${RH9_ISO_URL:-}" 0 1 || return 1
     prompt_with_default RHC_ORGANIZATION_ID "Red Hat Connector Organization ID (optional override)" "${RHC_ORGANIZATION_ID:-${CDN_ORGANIZATION_ID:-}}" 0 0 || return 1
     prompt_with_default RHC_ACTIVATION_KEY "Red Hat Connector Activation Key (optional override)" "${RHC_ACTIVATION_KEY:-${CDN_SAT_ACTIVATION_KEY:-}}" 1 0 || return 1
-    prompt_with_default HOST_INT_IP "Host bridge IP for guest HTTP callbacks" "${HOST_INT_IP:-192.168.122.1}" 0 1 || return 1
+    prompt_with_default HOST_INT_IP "Host bridge IP for guest HTTP callbacks" "${HOST_INT_IP:-10.168.0.1}" 0 1 || return 1
 
     sat_missing="$(count_missing_vars SAT_IP SAT_NETMASK SAT_GW SAT_HOSTNAME SAT_ALIAS SAT_DOMAIN SAT_ORG SAT_LOC SAT_FIREWALLD_INTERFACE SAT_FIREWALLD_ZONE SAT_FIREWALLD_SERVICES_JSON CDN_ORGANIZATION_ID CDN_SAT_ACTIVATION_KEY)"
     echo ""
@@ -11364,6 +11442,7 @@ run_aap_setup_on_vm() {
     local local_bundle_source=""
     local bundle_remote_name
     local galaxy_token_remote="${VAULT_CONSOLE_REDHAT_TOKEN:-${HUB_TOKEN:-}}"
+    local staged_inventory_dir="/home/admin/.minirhis-aap-inventory-stage"
 
     if ! is_enabled "${AAP_SSH_CALLBACK_ENABLED:-0}"; then
         print_step "AAP SSH callback is disabled; skipping run_aap_setup_on_vm."
@@ -11442,6 +11521,11 @@ run_aap_setup_on_vm() {
         fi
     fi
 
+    print_step "Staging AAP inventories on ${vm_name}: inventory, inventory-growth, DEMO-inventory"
+    if ! stage_aap_callback_inventories_on_vm "${vm_ip}" "${callback_ssh_key}"; then
+        print_warning "Inventory staging to ${vm_name} failed; continuing with in-guest fallback inventory normalization."
+    fi
+
     print_step "Running AAP containerized installer via SSH on ${vm_name} (${vm_ip})..."
     print_step "  Callback SSH key: ${callback_ssh_key}"
     print_step "  Installer command: ansible-playbook -i ${installer_inventory} ansible.containerized_installer.install"
@@ -11454,7 +11538,7 @@ run_aap_setup_on_vm() {
         set -o pipefail
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ForwardX11=no \
             -i "${callback_ssh_key}" "root@${vm_ip}" \
-            "BUNDLE_URL='${bundle_url_runtime}' BUNDLE_FILENAME='${bundle_remote_name}' INSTALLER_INVENTORY='${installer_inventory}' RH_USER_REMOTE='${RH_USER:-}' RH_PASS_REMOTE='${RH_PASS:-}' GALAXY_TOKEN_REMOTE='${galaxy_token_remote}' bash -s" <<'EOF_REMOTE' 2>&1 | tee -a "${AAP_SETUP_LOG_LOCAL}"
+            "BUNDLE_URL='${bundle_url_runtime}' BUNDLE_FILENAME='${bundle_remote_name}' INSTALLER_INVENTORY='${installer_inventory}' RH_USER_REMOTE='${RH_USER:-}' RH_PASS_REMOTE='${RH_PASS:-}' GALAXY_TOKEN_REMOTE='${galaxy_token_remote}' STAGED_INVENTORY_DIR='${staged_inventory_dir}' bash -s" <<'EOF_REMOTE' 2>&1 | tee -a "${AAP_SETUP_LOG_LOCAL}"
 set -euo pipefail
 
 ADMIN_HOME=/home/admin
@@ -11481,7 +11565,7 @@ extract_installer_bundle() {
     local detected_root
 
     stage_existing_overrides
-    detected_root="$(tar -tzf "${BUNDLE_TARBALL}" 2>/dev/null | head -1 | cut -d/ -f1)"
+    detected_root="$(tar -tzf "${BUNDLE_TARBALL}" 2>/dev/null | sed -n '1p' | cut -d/ -f1)"
     [ -n "${detected_root}" ] || detected_root="${BUNDLE_FILENAME%.tar.gz}"
 
     tar -xzf "${BUNDLE_TARBALL}" -C "${ADMIN_HOME}"
@@ -11525,6 +11609,15 @@ fi
 INSTALLER_ROOT="$(readlink -f "${INSTALLER_LINK}" 2>/dev/null || true)"
 [ -n "${INSTALLER_ROOT}" ] || INSTALLER_ROOT="${INSTALLER_LINK}"
 cd "${INSTALLER_ROOT}"
+
+if [ -d "${STAGED_INVENTORY_DIR:-}" ]; then
+    echo "[aap-install] copying staged inventories from ${STAGED_INVENTORY_DIR} to ${INSTALLER_ROOT}"
+    cp -f "${STAGED_INVENTORY_DIR}/inventory" "${INSTALLER_ROOT}/inventory"
+    cp -f "${STAGED_INVENTORY_DIR}/inventory-growth" "${INSTALLER_ROOT}/inventory-growth"
+    cp -f "${STAGED_INVENTORY_DIR}/DEMO-inventory" "${INSTALLER_ROOT}/DEMO-inventory"
+    chmod 600 "${INSTALLER_ROOT}/inventory" "${INSTALLER_ROOT}/inventory-growth" "${INSTALLER_ROOT}/DEMO-inventory"
+    chown admin:admin "${INSTALLER_ROOT}/inventory" "${INSTALLER_ROOT}/inventory-growth" "${INSTALLER_ROOT}/DEMO-inventory" || true
+fi
 
 dnf install -y --nogpgcheck wget git-core rsync vim ansible-core || true
 command -v ansible-playbook >/dev/null 2>&1 || dnf install -y --nogpgcheck ansible-core
@@ -11589,15 +11682,53 @@ chmod 600 "${INSTALLER_ROOT}/group_vars/automationeda/main.yml"
 chown -R admin:admin "${INSTALLER_ROOT}/group_vars" || true
 
 if [ ! -f "${INSTALLER_INVENTORY}" ]; then
-    echo "[aap-install] ERROR: expected inventory file not found: ${INSTALLER_INVENTORY}"
-    ls -la
-    exit 1
+    echo "[aap-install] WARNING: expected inventory file not found: ${INSTALLER_INVENTORY}"
+    if [ -f "inventory" ]; then
+        echo "[aap-install] falling back to inventory"
+        INSTALLER_INVENTORY="inventory"
+    elif [ -f "inventory-growth" ]; then
+        echo "[aap-install] falling back to inventory-growth"
+        INSTALLER_INVENTORY="inventory-growth"
+    elif [ -f "DEMO-inventory" ]; then
+        echo "[aap-install] falling back to DEMO-inventory"
+        INSTALLER_INVENTORY="DEMO-inventory"
+    else
+        echo "[aap-install] ERROR: no usable inventory file found"
+        ls -la
+        exit 1
+    fi
 fi
 
-echo "[aap-install] running ansible-playbook -i ${INSTALLER_INVENTORY} ansible.containerized_installer.install"
+# Some bundle revisions may miss one inventory variant. Normalize to ensure all
+# expected inventory filenames exist before installer invocation.
+if [ ! -f "inventory" ] && [ -f "inventory-growth" ]; then
+    cp -f inventory-growth inventory
+fi
+if [ ! -f "inventory-growth" ] && [ -f "inventory" ]; then
+    cp -f inventory inventory-growth
+fi
+if [ "${INSTALLER_INVENTORY}" = "DEMO-inventory" ] && [ ! -f "DEMO-inventory" ] && [ -f "inventory" ]; then
+    cp -f inventory DEMO-inventory
+fi
+
+if [ -f "ansible.containerized_installer.install.yml" ]; then
+    _installer_entrypoint="ansible.containerized_installer.install.yml"
+elif [ -f "collections/ansible_collections/ansible/containerized_installer/playbooks/install.yml" ]; then
+    _installer_entrypoint="ansible.containerized_installer.install"
+elif [ -f "setup.sh" ]; then
+    _installer_entrypoint="setup.sh"
+else
+    _installer_entrypoint="ansible.containerized_installer.install"
+fi
+echo "[aap-install] running installer entrypoint '${_installer_entrypoint}' with inventory ${INSTALLER_INVENTORY}"
 if [ -f /home/admin/aap-setup/collections/ansible_collections/ansible/containerized_installer/roles/preflight/tasks/nodes.yml ]; then
     sed -i '0,/ansible_user_uid != 0/s//ansible_user_uid >= 0/' \
         /home/admin/aap-setup/collections/ansible_collections/ansible/containerized_installer/roles/preflight/tasks/nodes.yml || true
+    if [ "${INSTALLER_INVENTORY}" = "DEMO-inventory" ]; then
+        sed -i -E 's/ansible_memtotal_mb[[:space:]]*>=[[:space:]]*15000/ansible_memtotal_mb >= 7000/' \
+            /home/admin/aap-setup/collections/ansible_collections/ansible/containerized_installer/roles/preflight/tasks/nodes.yml || true
+        echo "[aap-install] DEMO inventory selected: relaxed preflight RAM assertion to >= 7000 MB"
+    fi
     echo "[aap-install] relaxed non-root preflight assertion for callback run"
 fi
 
@@ -11660,7 +11791,15 @@ PY
     esac
 fi
 
-ANSIBLE_CONFIG="${INSTALLER_ROOT}/ansible.cfg" ansible-playbook -i "${INSTALLER_INVENTORY}" ansible.containerized_installer.install
+if [ "${_installer_entrypoint}" = "setup.sh" ]; then
+    chmod +x ./setup.sh
+    ANSIBLE_CONFIG="${INSTALLER_ROOT}/ansible.cfg" ./setup.sh -i "${INSTALLER_INVENTORY}"
+else
+    ANSIBLE_COLLECTIONS_PATH="${INSTALLER_ROOT}/collections:/usr/share/ansible/collections" \
+    ANSIBLE_COLLECTIONS_PATHS="${INSTALLER_ROOT}/collections:/usr/share/ansible/collections" \
+    ANSIBLE_CONFIG="${INSTALLER_ROOT}/ansible.cfg" \
+    ansible-playbook -i "${INSTALLER_INVENTORY}" "${_installer_entrypoint}"
+fi
 EOF_REMOTE
     ); then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] AAP setup FAILED on ${vm_ip}" | tee -a "${AAP_SETUP_LOG_LOCAL}"
@@ -11796,6 +11935,9 @@ serve_aap_bundle() {
     fi
 
     print_step "Starting AAP bundle HTTP server on ${HOST_INT_IP}:8080..."
+
+    # Remove stale http.server instances that may still be bound to a previous IP.
+    sudo pkill -f "python3 -m http.server 8080 --bind" >/dev/null 2>&1 || true
 
     # If firewalld is running, open port 8080 in the 'libvirt' zone (runtime-only — reverts on reload/reboot).
     if systemctl is-active --quiet firewalld 2>/dev/null; then
@@ -12064,7 +12206,7 @@ generate_satellite_618_kickstart() {
     rh_user_q="$(printf '%q' "${RH_USER}")"
     rh_pass_q="$(printf '%q' "${RH_PASS}")"
     domain_q="$(printf '%q' "${DOMAIN:-}")"
-    host_int_ip_q="$(printf '%q' "${HOST_INT_IP:-192.168.122.1}")"
+    host_int_ip_q="$(printf '%q' "${HOST_INT_IP:-10.168.0.1}")"
     cdn_org_q="$(printf '%q' "${cdn_org_clean}")"
     cdn_sat_key_q="$(printf '%q' "${cdn_sat_key_clean}")"
     sat_rhel10_baseos_repo_q="$(printf '%q' "${sat_rhel10_baseos_repo}")"
@@ -12789,12 +12931,24 @@ WantedBy=multi-user.target
 CMDB_HTTP_SVC
 
 systemctl daemon-reload
-systemctl enable --now minirhis-cmdb-refresh.timer
-systemctl start minirhis-cmdb-refresh.service || true
-systemctl enable --now minirhis-cmdb-http.service
+systemctl enable minirhis-cmdb-refresh.timer
+systemctl enable minirhis-cmdb-http.service
 
-firewall-cmd --permanent --add-port=18080/tcp || true
+# Ensure firewalld is active before applying permanent rules.
+# During kickstart %post the daemon may not be started yet; start it so
+# firewall-cmd can connect to its socket and write the permanent config.
+systemctl start firewalld 2>/dev/null || true
+
+# Open port 18080 in the configured zone (${SAT_FIREWALLD_ZONE}) and in
+# the public zone as a belt-and-suspenders fallback, then reload.
+firewall-cmd --zone=${SAT_FIREWALLD_ZONE} --permanent --add-port=18080/tcp || true
+firewall-cmd --zone=public --permanent --add-port=18080/tcp || true
 firewall-cmd --reload || true
+
+# Label port 18080 as http_port_t so SELinux allows python3 http.server
+# to bind on it when the minirhis-cmdb-http.service starts.
+semanage port -a -t http_port_t -p tcp 18080 2>/dev/null || \
+    semanage port -m -t http_port_t -p tcp 18080 2>/dev/null || true
 fi
 
 ${ks_perf_network_snapshot}
@@ -13450,6 +13604,44 @@ render_aap_inventory_template() {
         "$template_path"
 }
 
+stage_aap_callback_inventories_on_vm() {
+    local vm_ip="$1"
+    local ssh_key="$2"
+    local remote_stage_dir="/home/admin/.minirhis-aap-inventory-stage"
+    local tmp_stage_dir
+
+    tmp_stage_dir="$(mktemp -d)"
+
+    render_aap_inventory_template "inventory.j2" > "${tmp_stage_dir}/inventory" || {
+        rm -rf "${tmp_stage_dir}"
+        return 1
+    }
+    render_aap_inventory_template "inventory-growth.j2" > "${tmp_stage_dir}/inventory-growth" || {
+        rm -rf "${tmp_stage_dir}"
+        return 1
+    }
+    render_aap_inventory_template "DEMO-inventory.j2" > "${tmp_stage_dir}/DEMO-inventory" || {
+        rm -rf "${tmp_stage_dir}"
+        return 1
+    }
+
+    if ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ForwardX11=no \
+        -i "${ssh_key}" "root@${vm_ip}" "mkdir -p ${remote_stage_dir} && chown -R admin:admin ${remote_stage_dir}" >/dev/null 2>&1; then
+        rm -rf "${tmp_stage_dir}"
+        return 1
+    fi
+
+    if ! scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ForwardX11=no \
+        -i "${ssh_key}" "${tmp_stage_dir}/inventory" "${tmp_stage_dir}/inventory-growth" "${tmp_stage_dir}/DEMO-inventory" \
+        "root@${vm_ip}:${remote_stage_dir}/" >/dev/null 2>&1; then
+        rm -rf "${tmp_stage_dir}"
+        return 1
+    fi
+
+    rm -rf "${tmp_stage_dir}"
+    return 0
+}
+
 prompt_aap_details() {
     local missing=0
     normalize_shared_env_vars
@@ -13474,7 +13666,7 @@ prompt_aap_details() {
     set_or_prompt AAP_GW         "AAP Internal Gateway: "   || return 1
     echo -e "\n--- AAP Bundle Delivery (HTTP pre-flight) ---"
     set_or_prompt HUB_TOKEN  "Automation Hub Token (console.redhat.com/ansible/automation-hub/token): " 1 || return 1
-    set_or_prompt HOST_INT_IP "Host bridge IP for bundle HTTP server (default 192.168.122.1): " || return 1
+    set_or_prompt HOST_INT_IP "Host bridge IP for bundle HTTP server (default 10.168.0.1): " || return 1
     # AAP_BUNDLE_URL is optional in interactive mode (user may have downloaded already)
     if [ -z "${AAP_BUNDLE_URL:-}" ] && ! is_noninteractive; then
         read -r -p "AAP bundle .tar.gz URL from access.redhat.com (blank to skip preflight download): " AAP_BUNDLE_URL || true
@@ -13706,7 +13898,7 @@ extract_bundle_tree() {
     local detected_root installer_root
 
     stage_bundle_overrides
-    detected_root="$(tar -tzf "\${bundle_tarball}" 2>/dev/null | head -1 | cut -d/ -f1)"
+    detected_root="$(tar -tzf "\${bundle_tarball}" 2>/dev/null | sed -n '1p' | cut -d/ -f1)"
     [ -n "\${detected_root}" ] || detected_root="\${bundle_filename%.tar.gz}"
     tar -xzf "\${bundle_tarball}" -C "\${bundle_home}" >> /var/log/aap-setup-ready.log 2>&1
     installer_root="\${bundle_home}/\${detected_root}"
@@ -13728,9 +13920,16 @@ echo "Bundle download starting at \$(date)" >> /var/log/aap-setup-ready.log
 if [ -z "{{AAP_BUNDLE_URL}}" ]; then
     echo "WARNING: AAP_BUNDLE_URL is empty — skipping %post download; first-boot service will retry." >> /var/log/aap-setup-ready.log
 else
-    echo "Attempting AAP bundle download from: {{AAP_BUNDLE_URL}}" >> /var/log/aap-setup-ready.log
-    if curl -fL -C - --retry 3 --retry-delay 15 --connect-timeout 30 --max-time 7200 \
-            "{{AAP_BUNDLE_URL}}" -o "\${bundle_tarball}" >> /var/log/aap-setup-ready.log 2>&1; then
+    if [ -f "\${bundle_tarball}" ] && tar -tzf "\${bundle_tarball}" >/dev/null 2>&1; then
+        echo "Using existing local AAP bundle tarball: \${bundle_tarball}" >> /var/log/aap-setup-ready.log
+    else
+        echo "Attempting AAP bundle download from: {{AAP_BUNDLE_URL}}" >> /var/log/aap-setup-ready.log
+        if ! curl -fL -C - --retry 3 --retry-delay 15 --connect-timeout 30 --max-time 7200 \
+                "{{AAP_BUNDLE_URL}}" -o "\${bundle_tarball}" >> /var/log/aap-setup-ready.log 2>&1; then
+            echo "WARNING: Bundle download failed in %post; first-boot will retry." >> /var/log/aap-setup-ready.log
+        fi
+    fi
+    if [ -f "\${bundle_tarball}" ] && tar -tzf "\${bundle_tarball}" >/dev/null 2>&1; then
         if extract_bundle_tree; then
             if [ -f "\${bundle_dir}/ansible.containerized_installer.install.yml" ] || \
                [ -f "\${bundle_dir}/setup.sh" ]; then
@@ -13743,7 +13942,7 @@ else
             echo "WARNING: Bundle extraction failed in %post; first-boot will retry." >> /var/log/aap-setup-ready.log
         fi
     else
-        echo "WARNING: Bundle download failed in %post; first-boot will retry." >> /var/log/aap-setup-ready.log
+        echo "WARNING: No valid local bundle tarball available in %post; first-boot will retry." >> /var/log/aap-setup-ready.log
     fi
 fi
 
@@ -13796,7 +13995,7 @@ extract_bundle_tree() {
     local detected_root installer_root
 
     stage_bundle_overrides
-    detected_root="$(tar -tzf "${bundle_tarball}" 2>/dev/null | head -1 | cut -d/ -f1)"
+    detected_root="$(tar -tzf "${bundle_tarball}" 2>/dev/null | sed -n '1p' | cut -d/ -f1)"
     [ -n "${detected_root}" ] || detected_root="${bundle_filename%.tar.gz}"
     tar -xzf "${bundle_tarball}" -C "${bundle_home}" >> "${log}" 2>&1
     installer_root="${bundle_home}/${detected_root}"
@@ -13814,9 +14013,13 @@ if [ -z "${AAP_BUNDLE_URL}" ]; then
     echo "[$(date)] ERROR: AAP_BUNDLE_URL is empty in first-boot service." >> "${log}"
     exit 1
 fi
-echo "[$(date)] Downloading from: ${AAP_BUNDLE_URL}" >> "${log}"
-curl -fL -C - --retry 5 --retry-delay 30 --connect-timeout 60 --max-time 7200 \
-    "${AAP_BUNDLE_URL}" -o "${bundle_tarball}" >> "${log}" 2>&1
+if [ -f "${bundle_tarball}" ] && tar -tzf "${bundle_tarball}" >/dev/null 2>&1; then
+    echo "[$(date)] Reusing existing local tarball: ${bundle_tarball}" >> "${log}"
+else
+    echo "[$(date)] Downloading from: ${AAP_BUNDLE_URL}" >> "${log}"
+    curl -fL -C - --retry 5 --retry-delay 30 --connect-timeout 60 --max-time 7200 \
+        "${AAP_BUNDLE_URL}" -o "${bundle_tarball}" >> "${log}" 2>&1
+fi
 echo "[$(date)] Extracting bundle..." >> "${log}"
 extract_bundle_tree
 echo "[$(date)] Bundle fetch complete. Disabling first-boot service." >> "${log}"

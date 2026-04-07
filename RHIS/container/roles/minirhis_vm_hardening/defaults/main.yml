@@ -9,3 +9,9 @@ rhis_rc_local_mode: "0644"
 
 # Set to false to skip the rc.local hardening step
 rhis_revert_rc_local: true
+
+# Managed-node services that should remain reachable on the internal network.
+rhis_firewalld_services:
+  - ssh
+  - https
+  - cockpit

@@ -25,10 +25,11 @@
   become: true
 
 - name: Verify libvirtd is active
-  ansible.builtin.command: systemctl is-active libvirtd
+  ansible.builtin.systemd:
+    name: libvirtd
   register: libvirtd_state
   changed_when: false
-  failed_when: libvirtd_state.rc != 0
+  failed_when: libvirtd_state.status.ActiveState != 'active'
   become: true
 
 # ── polkit rule so non-root users in 'libvirt' group can manage qemu:///system ─
@@ -106,7 +107,12 @@
     immediate: true
     state: enabled
   become: true
-  ignore_errors: true   # libvirt service may not exist in all firewalld versions
+  failed_when:
+    - allow_libvirt_service.rc is defined
+    - allow_libvirt_service.rc != 0
+    - "'service libvirt not defined' not in (allow_libvirt_service.stderr |
+      default(''))"
+  register: allow_libvirt_service
 
 # ── SELinux port labels ───────────────────────────────────────────────────────
 
@@ -123,7 +129,7 @@
   become: true
   when: selinux_mode.stdout | default('Disabled') != 'Disabled'
 
-- name: Check if port {{ rhis_selinux_http_port }} already has http_port_t label
+- name: Check if port already has http_port_t label {{ rhis_selinux_http_port }}
   ansible.builtin.command: >
     semanage port -l
   register: semanage_ports
@@ -139,9 +145,13 @@
   when:
     - selinux_mode.stdout | default('Disabled') != 'Disabled'
     - semanage_ports.stdout is defined
-    - "'http_port_t' not in semanage_ports.stdout or rhis_selinux_http_port | string not in semanage_ports.stdout"
+    - "'http_port_t' not in semanage_ports.stdout or rhis_selinux_http_port |
+      string not in semanage_ports.stdout"
   register: semanage_add
   failed_when:
     - semanage_add.rc is defined
     - semanage_add.rc != 0
     - "'already defined' not in (semanage_add.stderr | default(''))"
+  changed_when:
+    - semanage_add.rc is defined
+    - semanage_add.rc == 0

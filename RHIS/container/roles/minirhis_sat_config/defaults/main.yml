@@ -46,11 +46,22 @@ rhis_sat_config_settings:
 
 # Partition tables to create
 rhis_sat_config_partition_tables:
-  - name: "Kickstart default thin"
+  - name: "Kickstart default thin RHIS"
     os_family: "Redhat"
     snippet: false
     file: "/usr/share/foreman/app/views/unattended/partition_tables/kickstart_defau\
       lt_thin.erb"
+
+# Fallback partition table layout used when the source file path above is not
+# available on the Ansible controller runtime.
+rhis_sat_config_partition_table_default_layout: |
+  zerombr
+  clearpart --all --initlabel
+  reqpart
+  part /boot --fstype="xfs" --size=1024
+  part pv.01 --grow --size=1
+  volgroup rhel pv.01
+  logvol / --fstype="xfs" --name=root --vgname=rhel --size=8192 --grow
 
 # Repository-sets to enable for each RHEL major version
 rhis_sat_config_repo_sets:
