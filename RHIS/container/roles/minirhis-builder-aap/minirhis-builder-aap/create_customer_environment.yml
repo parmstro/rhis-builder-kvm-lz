@@ -1,0 +1,173 @@
+---
+# create_customer_environment.yml
+#
+# Runs on platform_installer.  Collects customer-specific credentials and
+# topology from AAP survey extra_vars and writes a vault-encrypted
+# <CUSTOMER>-<ENV>.yml file to ~/.ansible/conf/customers/.
+#
+# This file contains ONLY the customer's own credentials — it never holds the
+# MiniRHIS operator's subscription, SSH keys, or admin passwords.
+#
+# Required extra_vars (typically from the AAP Customer Onboarding survey):
+#   aap_customer_name                 — e.g. "ACME"
+#   aap_customer_env                  — e.g. "PROD"
+#   customer_rh_user                  — customer Red Hat username
+#   customer_rh_pass                  — customer Red Hat password
+#   customer_admin_user               — node admin username (default: admin)
+#   customer_admin_pass               — node admin password
+#   customer_domain                   — DNS domain
+#   customer_realm                    — Kerberos realm (uppercase)
+#   customer_sat_org / sat_loc        — Satellite org & location
+#   customer_sat_hostname/ip          — Satellite node FQDN + IP
+#   customer_aap_hostname/ip          — AAP node FQDN + IP
+#   customer_idm_hostname/ip          — IdM node FQDN + IP
+#   customer_cdn_organization_id      — RH/CDN org ID
+#   customer_cdn_sat_activation_key   — Satellite registration activation key
+#
+# Optional:
+#   customer_rh_offline_token         — RH offline token
+#   customer_hub_token                — Automation Hub token
+#   customer_ipaadmin_password        — IdM ipa-admin password
+#   customer_ssh_key                  — SSH private key data (PEM)
+#   customer_vault_password           — vault password for this customer's
+#                                       files (defaults to MiniRHIS vault)
+#   aap_config_customer_env_dir       — override target directory
+#   aap_config_vault_pass_path        — override operator vault pass path
+
+- name: "Create customer environment vault file"
+  hosts: "platform_installer"
+  become: false
+
+  vars:
+    _customer_env_dir: >-
+      {{ aap_config_customer_env_dir
+         | default(ansible_env.HOME + '/.ansible/conf/customers') }}
+    _vault_pass_path: >-
+      {{ aap_config_vault_pass_path
+         | default(ansible_env.HOME + '/.ansible/conf/.vaultpass.txt') }}
+
+  tasks:
+    - name: "Validate required inputs"
+      ansible.builtin.assert:
+        that:
+          - aap_customer_name | default('') | length > 0
+          - aap_customer_env | default('') | length > 0
+        fail_msg: >-
+          Both aap_customer_name and aap_customer_env must be provided. Run this
+          playbook via the 'RHIS | Customer | Onboard New Environment' workflow
+          or pass --extra-vars "aap_customer_name=ACME aap_customer_env=PROD".
+
+    - name: "Derive file path"
+      ansible.builtin.set_fact:
+        _cust_id: "{{ (aap_customer_name | upper) + '-' + (aap_customer_env | upper) }}"
+        _cust_file: >-
+          {{ _customer_env_dir + '/'
+             + (aap_customer_name | upper) + '-'
+             + (aap_customer_env | upper) + '.yml' }}
+        _tmp_vaultpass: >-
+          {{ _customer_env_dir + '/.vaultpass-'
+             + (aap_customer_name | lower) + '-'
+             + (aap_customer_env | lower) + '.tmp' }}
+
+    - name: "Ensure customers directory exists (mode 0700)"
+      ansible.builtin.file:
+        path: "{{ _customer_env_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: "Write plain customer environment file"
+      ansible.builtin.copy:
+        dest: "{{ _cust_file }}"
+        mode: "0600"
+        content: |
+          ---
+          # Customer Environment Variables — {{ _cust_id }}
+          # Created : {{ ansible_date_time.iso8601 }}
+          # Managed by: RHIS Customer Onboarding workflow
+          # Scope   : Customer credentials only  (NOT MiniRHIS infrastructure)
+          #
+          # To decrypt:
+          #   ansible-vault view {{ _cust_file }} \
+          #     --vault-password-file {{ _vault_pass_path }}
+
+          customer_name: "{{ aap_customer_name | upper }}"
+          customer_env:  "{{ aap_customer_env | upper }}"
+          customer_env_created: "{{ ansible_date_time.iso8601 }}"
+
+          # ── Red Hat subscription ───────────────────────────────────────────
+          customer_rh_user: "{{ customer_rh_user | default('') }}"
+          customer_rh_pass: "{{ customer_rh_pass | default('') }}"
+          customer_rh_offline_token: "{{ customer_rh_offline_token | default('') }}"
+          customer_hub_token: "{{ customer_hub_token | default('') }}"
+          customer_cdn_organization_id: "{{ customer_cdn_organization_id | default('') }}"
+          customer_cdn_sat_activation_key: "{{ customer_cdn_sat_activation_key | default('') }}"
+
+          # ── Admin credentials ──────────────────────────────────────────────
+          customer_admin_user: "{{ customer_admin_user | default('admin') }}"
+          customer_admin_pass: "{{ customer_admin_pass | default('') }}"
+          customer_ipaadmin_password: "{{ customer_ipaadmin_password | default('') }}"
+          customer_ssh_key: "{{ customer_ssh_key | default('') }}"
+          customer_vault_password: "{{ customer_vault_password | default('') }}"
+
+          # ── Environment topology ───────────────────────────────────────────
+          customer_domain: "{{ customer_domain | default('') }}"
+          customer_realm: "{{ customer_realm | default('') }}"
+          customer_sat_org: "{{ customer_sat_org | default('') }}"
+          customer_sat_loc: "{{ customer_sat_loc | default('HQ') }}"
+          customer_sat_hostname: "{{ customer_sat_hostname | default('') }}"
+          customer_sat_ip: "{{ customer_sat_ip | default('') }}"
+          customer_aap_hostname: "{{ customer_aap_hostname | default('') }}"
+          customer_aap_ip: "{{ customer_aap_ip | default('') }}"
+          customer_idm_hostname: "{{ customer_idm_hostname | default('') }}"
+          customer_idm_ip: "{{ customer_idm_ip | default('') }}"
+      no_log: true
+
+    # ── vault-encrypt the file ────────────────────────────────────────────────
+    - name: "Resolve vault password to use for this customer"
+      ansible.builtin.set_fact:
+        _effective_vault_pass: >-
+          {{
+            customer_vault_password
+            if (customer_vault_password | default('') | length > 0)
+            else lookup('file', _vault_pass_path, errors='ignore') | default('')
+          }}
+      no_log: true
+
+    - name: "Write temporary vault password file"
+      when: _effective_vault_pass | length > 0
+      ansible.builtin.copy:
+        dest: "{{ _tmp_vaultpass }}"
+        content: "{{ _effective_vault_pass }}\n"
+        mode: "0600"
+      no_log: true
+
+    - name: "Encrypt customer environment file with ansible-vault"
+      when: _effective_vault_pass | length > 0
+      ansible.builtin.command:
+        cmd: >-
+          ansible-vault encrypt --vault-password-file {{ _tmp_vaultpass }} {{
+          _cust_file }}
+      changed_when: true
+      no_log: true
+
+    - name: "Remove temporary vault password file"
+      when: _effective_vault_pass | length > 0
+      ansible.builtin.file:
+        path: "{{ _tmp_vaultpass }}"
+        state: absent
+
+    - name: "Warn if vault encryption was skipped"
+      when: _effective_vault_pass | length == 0
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: No vault password was available — customer environment file
+          was written in plain text.  Encrypt it manually:
+            ansible-vault encrypt {{ _cust_file }}
+
+    - name: "Report completion"
+      ansible.builtin.debug:
+        msg: >-
+          Customer environment file written: {{ _cust_file }} Next: run 'RHIS |
+          Customer | Provision Credentials' with aap_customer_name={{
+          aap_customer_name | upper }} aap_customer_env={{ aap_customer_env |
+          upper }}

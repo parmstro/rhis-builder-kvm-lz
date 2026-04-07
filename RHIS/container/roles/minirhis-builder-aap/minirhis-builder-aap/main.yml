@@ -1,0 +1,147 @@
+---
+- name: "Apply installation prequisites to hosts"
+  hosts: "aap_hosts"
+  become: true
+
+  tasks:
+    - name: "Load the vault variables"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+
+    - name: "Load the other variables"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+
+    - name: "Load the vault variables"
+      when: vault_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vault_dir }}"
+
+    - name: "Load the other variables"
+      when: vars_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vars_dir }}"
+
+    - name: "Normalize AAP deployment mode defaults"
+      ansible.builtin.set_fact:
+        platform_deployment_type: "{{ platform_deployment_type |
+          default(aap_deployment_type | default('container')) }}"
+        aap_platform_host: "{{ aap_platform_host | default('https://' + (ansible_host |
+          default(inventory_hostname))) }}"
+        aap_platform_username: "{{ aap_platform_username | default(aap_admin_user |
+          default(ansible_user | default('admin'))) }}"
+        aap_platform_password: "{{ aap_platform_password | default(aap_admin_password |
+          default(global_admin_password | default(''))) }}"
+        aap_validate_certs: "{{ aap_validate_certs | default(false) | bool }}"
+        auth_source_fqdn: "{{ auth_source_fqdn | default(ipa_server_fqdn |
+          default(idm_hostname | default('idm.prod.spg'))) }}"
+        auth_source_username: "{{ auth_source_username | default(ipa_admin_principal |
+          default('admin')) }}"
+        auth_source_password: "{{ auth_source_password | default(ipa_admin_password |
+          default(global_admin_password | default(''))) }}"
+        platform_installer_config: >-
+          {{
+            (platform_installer_config | default({}))
+            | combine({'deployment_type': (platform_deployment_type | default(aap_deployment_type | default('container')))}, recursive=True)
+          }}
+      changed_when: false
+      tags:
+        - always
+
+    - name: "Set up the prerequesites for the nodes"
+      ansible.builtin.include_role:
+        name: platform_node_pre
+        apply:
+          tags:
+            - tags_phase_4
+            - tags_platform
+            - tags_all_nodes
+      tags:
+        - tags_phase_4
+        - tags_platform
+        - tags_all_nodes
+
+- name: "Install the Ansible Automation Platform"
+  hosts: "platform_installer"
+  become: true
+
+  tasks:
+    - name: "Load the vault variables"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+
+    - name: "Load the other variables"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+
+    - name: "Load the vault variables"
+      when: vault_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vault_dir }}"
+
+    - name: "Load the other variables"
+      when: vars_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vars_dir }}"
+
+    - name: "Normalize AAP deployment mode defaults"
+      ansible.builtin.set_fact:
+        platform_deployment_type: "{{ platform_deployment_type |
+          default(aap_deployment_type | default('container')) }}"
+        aap_platform_host: "{{ aap_platform_host | default('https://' + (ansible_host |
+          default(inventory_hostname))) }}"
+        aap_platform_username: "{{ aap_platform_username | default(aap_admin_user |
+          default(ansible_user | default('admin'))) }}"
+        aap_platform_password: "{{ aap_platform_password | default(aap_admin_password |
+          default(global_admin_password | default(''))) }}"
+        aap_validate_certs: "{{ aap_validate_certs | default(false) | bool }}"
+        auth_source_fqdn: "{{ auth_source_fqdn | default(ipa_server_fqdn |
+          default(idm_hostname | default('idm.prod.spg'))) }}"
+        auth_source_username: "{{ auth_source_username | default(ipa_admin_principal |
+          default('admin')) }}"
+        auth_source_password: "{{ auth_source_password | default(ipa_admin_password |
+          default(global_admin_password | default(''))) }}"
+        platform_installer_config: >-
+          {{
+            (platform_installer_config | default({}))
+            | combine({'deployment_type': (platform_deployment_type | default(aap_deployment_type | default('container')))}, recursive=True)
+          }}
+      changed_when: false
+      tags:
+        - always
+
+    - name: "Download and run the platform installer"
+      ansible.builtin.include_role:
+        name: platform
+        apply:
+          tags:
+            - tags_phase_4
+            - tags_platform
+            - tags_platform_installer
+      tags:
+        - tags_phase_4
+        - tags_platform
+        - tags_platform_installer
+
+    - name: "Check whether rc.local exists"
+      ansible.builtin.stat:
+        path: "/etc/rc.d/rc.local"
+      register: _rhis_aap_rc_local
+      tags:
+        - tags_phase_4
+        - tags_platform
+        - tags_platform_installer
+
+    - name: "Ensure rc.local is non-executable"
+      when: _rhis_aap_rc_local.stat.exists | default(false)
+      ansible.builtin.file:
+        path: "/etc/rc.d/rc.local"
+        mode: "0644"
+      tags:
+        - tags_phase_4
+        - tags_platform
+        - tags_platform_installer

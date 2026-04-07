@@ -1,0 +1,15 @@
+[ipaserver]
+idm5.parmstrong.ca
+
+[ipareplicas]
+idm6.parmstrong.ca
+
+[ipacluster:children]
+ipaserver
+ipareplicas
+
+[ipacluster:vars]
+
+
+[ipaclients]
+rme2.parmstrong.ca

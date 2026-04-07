@@ -1,0 +1,25 @@
+---
+
+# remove the disk based on the target
+
+- name: "Remove the snapshot disk from the list of current_pvs"
+  ansible.builtin.set_fact:
+    current_pvs: "{{ current_pvs | difference(snapshot_disk_pv_name) }}"
+
+- name: "Remove the pv from the vg"
+  community.general.lvg:
+    vg: "{{ snapshot_vg }}"
+    pvs: "{{ current_pvs }}"
+
+# now free up the disk on the platform.
+- name: "Remove the VMware snapshot disk"
+  when: host_platform == "vmware"
+  ansible.builtin.include_tasks: "remove_vmware_disk.yml"
+
+- name: "Remove the Azure snapshot disk"
+  when: host_platform == "azure"
+  ansible.builtin.include_tasks: "remove_azure_disk.yml"
+
+- name: "Remove the AWS snapshot disk"
+  when: host_platform == "aws"
+  ansible.builtin.include_tasks: "remove_aws_disk.yml"

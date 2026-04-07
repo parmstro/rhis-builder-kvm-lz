@@ -1,0 +1,19 @@
+---
+# Defaults for rhis_vm_lifecycle role
+
+# Names of RHIS VMs managed by virsh
+rhis_vms:
+  - satellite
+  - aap
+  - idm
+
+# Action to perform: power_on | reboot | set_passwords
+# Overridden at call time via --extra-vars
+rhis_vm_action: power_on
+
+# Admin password to set as root password (via virsh set-user-password).
+# Sourced from vault at runtime; do NOT hardcode here.
+rhis_vm_root_password: "{{ admin_pass | default('') }}"
+
+# Seconds to wait after issuing reboot before post-settle checks
+rhis_vm_reboot_settle_sec: 15

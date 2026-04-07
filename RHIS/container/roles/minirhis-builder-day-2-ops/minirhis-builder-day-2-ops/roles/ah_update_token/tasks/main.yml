@@ -1,0 +1,15 @@
+---
+
+- name: "Call the token update URI" # noqa command-instead-of-shell
+  ansible.builtin.uri:
+    url: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      refresh_token: "{{ refresh_token }}"
+      client_id: "{{ client_id }}"
+      grant_type: "refresh_token"
+    headers:
+      Content-Type: "application/x-www-form-urlencoded"
+    return_content: true
+  register: token_refresh_result

@@ -1,0 +1,257 @@
+MiniRHIS BUG REPORT (UPDATED)
+Generated: 2026-03-29
+Workspace: /home/sgallego/GIT/MiniRHIS
+Scope: Full set of Satellite-flow fixes applied during this troubleshooting day
+
+================================================================================
+1) INCIDENTS ADDRESSED (CONSOLIDATED)
+================================================================================
+
+1. Satellite installer readiness/validation was fragile during long or staged runs.
+2. Hammer/PXE operations failed due auth/config drift and missing proxy features.
+3. PXE prerequisites failed in filtered-exclude package environments.
+4. Satellite role-import pipeline failed repeatedly on missing variables:
+   - satellite_url
+   - satellite_username
+   - satellite_api_proxy_id_string
+   - ansible_roles_import_list
+5. Satellite reboot readiness checks were too short for real convergence windows.
+6. Installer entrypoints drifted (shell vs python) and required parity alignment.
+
+
+================================================================================
+2) CHANGE LOG IN REQUESTED FORMAT
+================================================================================
+
+[A]
+TASK: Configure Hammer globally with resilient auth/host fallback + API hard gate
+Task Path: container/roles/rhis-builder-satellite/tasks/configure_hammer.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Added fallback facts for hammer username/password/host
+  (__hammer_cfg_username, __hammer_cfg_password, __hammer_cfg_host).
+- Rewrote global hammer config generation for root/skel/admin users.
+- Added Satellite API readiness hard gate using /api/status (200/401/403).
+- Kept hammer command as diagnostic-only (non-fatal), then health assertion.
+The Discryption(why it was done):
+- Prevents failures caused by stale ~/.hammer state, missing explicit credentials,
+  and false negatives when hammer internals are slow while API is already healthy.
+
+[B]
+
+HOTFIXES APPLIED (2026-03-31)
+---------------------------------
+- Patched `host_vars/satellite_content_profile.yml` to remove recursive Jinja templating of `satellite_organization` and set an explicit organization (`REDHAT`) and admin credentials for post-install automation.
+- Added `label` fields to each requested `lifecycle_environments` entry so the `redhat.satellite.lifecycle_environment` module receives the expected schema.
+- Updated `container/roles/rhis-builder-satellite/roles/lifecycle_environments/tasks/main.yml` to enable debug output and remove `no_log` to surface module return data during troubleshooting.
+- Added managed hotfix functions to `MiniRHIS.sh` so the installer applies these fixes automatically into the running provisioner container (`ensure_fix_satellite_content_profile`, `ensure_patch_lifecycle_tasks`).
+
+Notes:
+- These hotfixes were applied to both the repository host copies and the running provisioner container where possible. Review `/tmp/rhis_debug_lifecycle.log` and the per-run logs under `/var/log/rhis/` for detailed Ansible output.
+TASK: Ensure local proxy TFTP feature is enabled before PXE default generation
+Task Path: container/roles/rhis-builder-satellite/tasks/ensure_local_tftp_proxy.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Added smart-proxy discovery, refresh-features, feature inspection, and
+  conditional satellite-installer TFTP enablement.
+- Added post-enable refresh for proxy features.
+The Discryption(why it was done):
+- `hammer template build-pxe-default` requires a TFTP-capable proxy.
+  This guarantees prerequisite proxy capability instead of failing later.
+
+[C]
+TASK: Build PXE defaults with prerequisite gating and clear failure paths
+Task Path: container/roles/rhis-builder-satellite/tasks/build_pxe_linux_defaults.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Added import of `ensure_local_tftp_proxy.yml` before PXE build.
+- Added explicit fail branches for:
+  1) no TFTP Capsules
+  2) unexpected PXE build errors.
+- Added assert for generated `/var/lib/tftpboot/pxelinux.cfg/default`.
+The Discryption(why it was done):
+- Ensures PXE operations fail fast with actionable diagnostics instead of
+  opaque hammer return codes.
+
+[D]
+TASK: Install/enable PXE prerequisites in exclude-filtered environments
+Task Path: container/roles/rhis-builder-satellite/tasks/ensure_pxe_prereqs.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Added required packages install (`syslinux`, `tftp-server`) with
+  `disable_excludes: all`.
+- Added optional package installs (`dhcp-server`, `bind`) with warning-only flow.
+- Added best-effort service enable/start and TFTP root directory enforcement.
+The Discryption(why it was done):
+- Prevents hard-fail where repository policy excludes optional networking
+  packages while preserving mandatory PXE baseline.
+
+[E]
+TASK: Execute PXE prerequisites before PXE default build
+Task Path: container/roles/rhis-builder-satellite/main.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Inserted `import_tasks: tasks/ensure_pxe_prereqs.yml` immediately before
+  `tasks/build_pxe_linux_defaults.yml`.
+The Discryption(why it was done):
+- Enforces correct order of operations and removes race/missing-dependency risk.
+
+[F]
+TASK: Always clear package locks in satellite_pre phase
+Task Path:
+- container/roles/rhis-builder-satellite/roles/satellite_pre/tasks/main.yml
+- container/roles/rhis-builder-satellite/roles/satellite_pre/tasks/ensure_packages_unlock.yml
+Role Name: rhis-builder-satellite / satellite_pre
+The Fix:
+- Added explicit import of `ensure_packages_unlock.yml` in pre phase.
+- `foreman-maintain packages unlock` now runs best-effort prior to package/installer actions.
+The Discryption(why it was done):
+- Avoids installer/package transaction failures due leftover lock state.
+
+[G]
+TASK: Make Satellite tuning reboot resilient
+Task Path:
+- container/roles/rhis-builder-satellite/roles/satellite_pre/defaults/main.yml
+- container/roles/rhis-builder-satellite/roles/satellite_pre/tasks/tune_for_satellite.yml
+Role Name: rhis-builder-satellite / satellite_pre
+The Fix:
+- Added reboot timing defaults:
+  `sat_reboot_pre_delay`, `sat_reboot_post_delay`, `sat_reboot_timeout`.
+- Reboot task now consumes these values (default timeout 900).
+The Discryption(why it was done):
+- Satellite can reboot slowly after kernel/tuning changes; prior timeout was too short.
+
+[H]
+TASK: Harden Satellite ansible role import API flow for missing vars
+Task Path: container/roles/rhis-builder-satellite/tasks/ensure_import_roles.yml
+Role Name: rhis-builder-satellite
+The Fix:
+- Added fallback facts for URL/user/password:
+  `__satellite_import_url`, `__satellite_import_username`, `__satellite_import_password`.
+- Added proxy ID discovery fallback via hammer output parsing when
+  `satellite_api_proxy_id_string` is absent.
+- Added proxy ID assertion with clear fail message.
+- Changed import list handling to strict-safe access:
+  `vars['ansible_roles_import_list'] | default([])`.
+- Added skip debug path when no roles are defined.
+The Discryption(why it was done):
+- Eliminates repeated runtime crashes from undefined variables and allows
+  clean no-op behavior when no role import list is provided.
+
+[I]
+TASK: Strengthen container hotfix verification coverage
+Task Path: MiniRHIS.sh (function: ensure_container_playbook_hotfixes)
+Role Name: Orchestrator (shell)
+The Fix:
+- Verification now checks for Satellite hardening markers including:
+  - configure_hammer API gate
+  - strict-safe role import guard (`vars['ansible_roles_import_list']`)
+  - local TFTP proxy task presence
+  - package-unlock pre-task presence
+- Updated verification success messaging accordingly.
+The Discryption(why it was done):
+- Ensures runtime container content actually includes all required fixes before
+  running component playbooks.
+
+[J]
+TASK: Replace Satellite post-healthcheck hammer ping logic with API readiness logic
+Task Path: MiniRHIS.sh (function: run_post_install_healthcheck)
+Role Name: Orchestrator (shell)
+The Fix:
+- Replaced `hammer ping`-based checks/retry labels with `/api/status` based
+  checks and retry logic (`200/401/403`).
+The Discryption(why it was done):
+- Avoids known hammer race behaviors and uses a more stable application
+  readiness signal.
+
+[K]
+TASK: Ensure package unlock before Satellite installer invocations
+Task Path: MiniRHIS.sh
+Role Name: Orchestrator (shell)
+The Fix:
+- Added `foreman-maintain packages unlock` before key
+  `satellite-installer --scenario satellite` invocations:
+  - pre-container validation loop
+  - post-CaC installer pass
+  - kickstart phase installer path
+The Discryption(why it was done):
+- Prevents package lock contention across repeated Satellite scenario runs.
+
+[L]
+TASK: First-pass Satellite installer command uses explicit org/location/admin + ansible plugins
+Task Path:
+- MiniRHIS.sh (run_satellite_precontainer_bootstrap)
+- rhis_installer.py (SatelliteManager.precontainer_bootstrap)
+Role Name: Orchestrator (shell + python)
+The Fix:
+- First-run command now includes:
+  - `--foreman-initial-organization` from SAT_ORG
+  - `--foreman-initial-location` from SAT_LOC
+  - `--foreman-initial-admin-username` from ADMIN_USER
+  - `--foreman-initial-admin-password` from ADMIN_PASS
+  - `--enable-foreman-plugin-ansible`
+  - `--enable-foreman-proxy-plugin-ansible`
+The Discryption(why it was done):
+- Aligns first-pass behavior with requested operational baseline and avoids
+  relying on implicit defaults.
+
+[M]
+TASK: Bring Python installer Satellite flow to parity with shell hardening
+Task Path: rhis_installer.py
+Role Name: Orchestrator (python)
+The Fix:
+- Added configurable defaults:
+  `SAT_API_READY_TIMEOUT`, `SAT_API_READY_INTERVAL`, `SAT_POST_REBOOT_WAIT`,
+  `SAT_SCENARIO_RETRIES`, `SAT_SCENARIO_RETRY_DELAY`.
+- Added `_wait_for_api_ready()` helper and invoked after bootstrap and
+  post-reboot scenario validation.
+- Added package unlock before installer calls.
+The Discryption(why it was done):
+- Reduces behavior drift between entrypoints and improves reliability in
+  long-running Satellite convergence windows.
+
+
+================================================================================
+3) RHIS-PROVISIONER RUNTIME SYNC ACTIONS (TODAY)
+================================================================================
+
+The following files were copied to the running `rhis-provisioner` container
+during troubleshooting to apply fixes immediately:
+
+- /rhis/rhis-builder-satellite/tasks/configure_hammer.yml
+- /rhis/rhis-builder-satellite/tasks/build_pxe_linux_defaults.yml
+- /rhis/rhis-builder-satellite/tasks/ensure_local_tftp_proxy.yml
+- /rhis/rhis-builder-satellite/tasks/ensure_pxe_prereqs.yml
+- /rhis/rhis-builder-satellite/tasks/ensure_import_roles.yml
+- /rhis/rhis-builder-satellite/main.yml
+- /rhis/rhis-builder-satellite/roles/satellite_pre/tasks/main.yml
+- /rhis/rhis-builder-satellite/roles/satellite_pre/tasks/ensure_packages_unlock.yml
+- /rhis/rhis-builder-satellite/roles/satellite_pre/tasks/tune_for_satellite.yml
+- /rhis/rhis-builder-satellite/roles/satellite_pre/defaults/main.yml
+
+
+================================================================================
+4) EXPECTED BEHAVIOR AFTER ALL UPDATES
+================================================================================
+
+1. First-pass Satellite installer uses explicit org/location/admin + ansible
+   plugin enablement.
+2. Package lock state no longer blocks repeated Satellite installer runs.
+3. Satellite readiness checks rely on API health gates instead of fragile hammer
+   ping-only behavior.
+4. PXE workflow is ordered, prerequisite-safe, and resilient to package excludes.
+5. Role-import flow is robust to missing optional vars and cleanly skips when no
+   import list is provided.
+6. Shell and Python installers now have improved parity for Satellite bootstrap
+   reliability and readiness handling.
+
+
+================================================================================
+5) NOTES
+================================================================================
+
+- This report supersedes earlier one-off notes from the same day.
+- Secret values are intentionally not echoed in this report.
+- Focus remains on Satellite/rhis-provisioner flow and installer orchestration
+  changes required to stabilize that path.
+

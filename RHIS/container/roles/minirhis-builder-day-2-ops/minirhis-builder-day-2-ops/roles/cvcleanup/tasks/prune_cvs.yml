@@ -1,0 +1,14 @@
+---
+
+
+- name: "Pruning Content View: {{ cv.name }}"
+  ansible.builtin.include_role:
+    name: redhat.satellite.content_view_version_cleanup
+  vars:
+    satellite_server_url: "{{ sat_server_url }}" # noqa: var-naming[no-role-prefix]
+    satellite_username: "{{ sat_username }}" # noqa: var-naming[no-role-prefix]
+    satellite_password: "{{ sat_password }}" # noqa: var-naming[no-role-prefix]
+    satellite_organization: "{{ sat_organization }}" # noqa: var-naming[no-role-prefix]
+    satellite_validate_certs: "{{ sat_validate_certs }}" # noqa: var-naming[no-role-prefix]
+    satellite_content_view_version_cleanup_keep: "{{ cv.num_cvs_to_keep }}" # noqa: var-naming[no-role-prefix]
+    search: "name ~ {{ cv.name }}" # noqa: var-naming[no-role-prefix]

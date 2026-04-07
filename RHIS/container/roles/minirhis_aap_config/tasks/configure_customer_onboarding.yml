@@ -1,0 +1,134 @@
+---
+# tasks/configure_customer_onboarding.yml — minirhis_aap_config
+#
+# Creates the AAP objects that enable the customer / project environment
+# onboarding workflow.  These templates and workflow are distinct from the
+# MiniRHIS infrastructure layer — they are the operator-facing UI for
+# onboarding new customers and creating their isolated credential sets.
+#
+# Objects created:
+#   Job Template  — "RHIS | Customer | Interview"
+#     Runs rhis-builder-interview against new nodes to interactively
+#     collect environment details.
+#
+#   Job Template  — "RHIS | Customer | Create Environment File"
+#     Runs create_customer_environment.yml on platform_installer.
+#     Writes a vault-encrypted <CUSTOMER>-<ENV>.yml to
+#     ~/.ansible/conf/customers/ from survey data.
+#
+#   Job Template  — "RHIS | Customer | Provision Credentials"
+#     Runs provision_customer_credentials.yml on platform_installer.
+#     Reads the vault file and creates a namespaced credential set in AAP.
+#
+#   Workflow      — "RHIS | Customer | Onboard New Environment"
+#     Survey → Create Environment File → Provision Credentials
+
+# ── Interview template (via upstream rhis-builder-interview) ─────────────────
+- name: "Customer Onboarding | Ensure 'RHIS | Customer | Interview' template"
+  ansible.controller.job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "RHIS | Customer | Interview"
+    description: >-
+      Runs the rhis-builder-interview playbook to interactively collect customer
+      environment details and generate a vaulted environment file.
+    organization: "{{ aap_config_organization }}"
+    project: "rhis-builder-interview"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+    execution_environment: "{{ aap_config_ee_name }}"
+    job_type: "run"
+    ask_variables_on_launch: true
+    ask_inventory_on_launch: false
+    ask_credential_on_launch: false
+    become_enabled: true
+    state: present
+  tags: rhis_aap_customer_onboarding
+
+# ── Create environment file template ─────────────────────────────────────────
+- name: "Customer Onboarding | Ensure 'RHIS | Customer | Create Environment File'
+    template"
+  ansible.controller.job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "RHIS | Customer | Create Environment File"
+    description: >-
+      Writes a vault-encrypted <CUSTOMER>-<ENV>.yml file to the
+      platform_installer host from survey-collected data.  MiniRHIS
+      infrastructure credentials are NOT written to this file — only
+      customer-specific credentials and topology.
+    organization: "{{ aap_config_organization }}"
+    project: "rhis-builder-aap"
+    playbook: "create_customer_environment.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+    execution_environment: "{{ aap_config_ee_name }}"
+    job_type: "run"
+    ask_variables_on_launch: true
+    ask_inventory_on_launch: false
+    ask_credential_on_launch: false
+    become_enabled: true
+    state: present
+  tags: rhis_aap_customer_onboarding
+
+# ── Provision credentials template ───────────────────────────────────────────
+- name: "Customer Onboarding | Ensure 'RHIS | Customer | Provision Credentials'
+    template"
+  ansible.controller.job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "RHIS | Customer | Provision Credentials"
+    description: >-
+      Reads the <CUSTOMER>-<ENV>.yml vault file from platform_installer and
+      creates a fully namespaced credential set in AAP.  Credentials are
+      isolated from the MiniRHIS infrastructure layer and cannot be used to
+      manage MiniRHIS components.
+    organization: "{{ aap_config_organization }}"
+    project: "rhis-builder-aap"
+    playbook: "provision_customer_credentials.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+    execution_environment: "{{ aap_config_ee_name }}"
+    job_type: "run"
+    ask_variables_on_launch: true
+    ask_inventory_on_launch: false
+    ask_credential_on_launch: false
+    become_enabled: true
+    state: present
+  tags: rhis_aap_customer_onboarding
+
+# ── Onboarding workflow ───────────────────────────────────────────────────────
+- name: "Customer Onboarding | Ensure workflow '{{
+    aap_config_customer_onboarding_workflow.name }}'"
+  ansible.controller.workflow_job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ aap_config_customer_onboarding_workflow.name }}"
+    description: "{{ aap_config_customer_onboarding_workflow.description | default(omit) }}"
+    organization: >-
+      {{ aap_config_customer_onboarding_workflow.organization
+         | default(aap_config_organization) }}
+    inventory: "{{ aap_config_customer_onboarding_workflow.inventory | default(omit) }}"
+    ask_variables_on_launch: >-
+      {{ aap_config_customer_onboarding_workflow.ask_variables_on_launch |
+      default(false) }}
+    survey_enabled: "{{ aap_config_customer_onboarding_workflow.survey_enabled |
+      default(true) }}"
+    survey_spec: "{{ aap_config_customer_onboarding_workflow.survey_spec }}"
+    state: "{{ aap_config_customer_onboarding_workflow.state | default('present') }}"
+  tags: rhis_aap_customer_onboarding

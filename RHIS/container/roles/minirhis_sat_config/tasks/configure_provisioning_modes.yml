@@ -1,0 +1,48 @@
+---
+# tasks/configure_provisioning_modes.yml — rhis_sat_config
+# Validate that Satellite provisioning prerequisites
+# (kickstart baseline assets) are present.
+
+- name: "Query kickstart provisioning prerequisites"
+  when: rhis_sat_config_require_kickstart_provisioning | bool
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Verify prerequisite exists in Satellite: {{ item.label }}"
+      redhat.satellite.resource_info:
+        resource: "{{ item.resource }}"
+        search: "name = {{ item.name }}"
+      register: _prov_prereqs
+      vars:
+        provisioning_prereqs:
+          - label: "domain"
+            resource: "domains"
+            name: "{{ rhis_sat_config_domain }}"
+          - label: "subnet"
+            resource: "subnets"
+            name: "Provisioning_Net"
+          - label: "partition table"
+            resource: "ptables"
+            name: "{{ rhis_sat_config_partition_tables[0].name }}"
+      loop: "{{ provisioning_prereqs }}"
+      loop_control:
+        label: "{{ item.label }}"
+      no_log: true
+      tags:
+        - tags_sat_config_provisioning_modes
+
+    - name: "Assert all provisioning prerequisites are present"
+      ansible.builtin.assert:
+        that:
+          - (item.resources | default([]) | length) > 0
+        fail_msg: "Kickstart prerequisite '{{ item.item.label }}' not found in
+          Satellite."
+      loop: "{{ _prov_prereqs.results }}"
+      loop_control:
+        label: "{{ item.item.label }}"
+      tags:
+        - tags_sat_config_provisioning_modes

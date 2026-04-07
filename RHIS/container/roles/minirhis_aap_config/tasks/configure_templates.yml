@@ -1,0 +1,31 @@
+---
+# tasks/configure_templates.yml — minirhis_aap_config
+# Creates one job template per deployable RHIS project.
+
+- name: "RHIS AAP Config | Ensure job template '{{ tmpl.name }}'"
+  ansible.controller.job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ tmpl.name }}"
+    description: "{{ tmpl.description | default(omit) }}"
+    organization: "{{ tmpl.organization | default(aap_config_organization) }}"
+    project: "{{ tmpl.project }}"
+    playbook: "{{ tmpl.playbook | default('main.yml') }}"
+    inventory: "{{ tmpl.inventory | default('RHIS Builder Inventory') }}"
+    credentials: "{{ tmpl.credentials | default([]) }}"
+    execution_environment: "{{ tmpl.execution_environment | default(aap_config_ee_name) }}"
+    job_type: "{{ tmpl.job_type | default('run') }}"
+    ask_variables_on_launch: "{{ tmpl.ask_variables_on_launch | default(true) }}"
+    ask_inventory_on_launch: "{{ tmpl.ask_inventory_on_launch | default(false) }}"
+    ask_credential_on_launch: "{{ tmpl.ask_credential_on_launch | default(false) }}"
+    survey_enabled: "{{ tmpl.survey_enabled | default(false) }}"
+    survey_spec: "{{ tmpl.survey_spec | default(omit) }}"
+    become_enabled: "{{ tmpl.become_enabled | default(true) }}"
+    state: "{{ tmpl.state | default('present') }}"
+  loop: "{{ aap_config_templates }}"
+  loop_control:
+    loop_var: tmpl
+    label: "{{ tmpl.name }}"
+  no_log: false

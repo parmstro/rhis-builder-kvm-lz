@@ -1,0 +1,16 @@
+---
+# Perform the power action
+# one of powered-off, powered-on, reboot-guest, restarted, shutdown-guest, suspended, present (default == powered-on)
+# power_action_force: true | false
+
+- name: "Power Action is setting power state: {{ power_action_target_state }} for host: {{ host.name }}" # noqa: name[template]
+  vmware.vmware.vm_powerstate:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ datacenter_name }}"
+    folder: "{{ datacenter_folder }}"
+    name: "{{ host.name }}"
+    state: "{{ power_action_target_state }}"
+    force: "{{ power_action_force | default(false) }}"
+    validate_certs: "{{ vmware_validate_certs }}"

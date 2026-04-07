@@ -1,0 +1,25 @@
+---
+# remove the snapshot disk
+
+# for local connection use force the use of the controllers python interpreter
+- name: "Remove disk to the convert2rhel host in vmware"
+  connection: local
+  community.vmware.vmware_guest_disk:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ datacenter_name }}"
+    name: "{{ ansible_fqdn }}"
+    disk:
+      - state: "absent"
+        scsi_controller: "{{ snapshot_disk_controller }}"
+        unit_number: "{{ snapshot_disk_unit }}"
+        destroy: "true"
+    validate_certs: "{{ validate_certs | default(false) }}"
+  vars:
+    ansible_python_interpreter: "/usr/bin/python3"
+
+- name: "Cleanup the UUID file for the removed disk"
+  ansible.builtin.file:
+    path: "/etc/lvm_snapshots/c2r_{{ snapshot_vg }}_snapshot_disk_uuid"
+    state: "absent"

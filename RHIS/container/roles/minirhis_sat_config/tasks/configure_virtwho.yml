@@ -1,0 +1,96 @@
+---
+# tasks/configure_virtwho.yml — rhis_sat_config
+# Creates virt-who configuration for libvirt mapping.
+
+- name: "Get organization ID for virt-who config"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Lookup organization info for virt-who config"
+      redhat.satellite.organization_info:
+        name: "{{ satellite_organization }}"
+      register: _virtwho_org
+      no_log: true
+      tags:
+        - tags_sat_config_virtwho
+
+- name: "Build virt-who configuration payload"
+  ansible.builtin.set_fact:
+    _virtwho_payload:
+      foreman_virt_who_configure_config:
+        name: "{{ rhis_sat_config_virtwho_name }}"
+        interval: "{{ rhis_sat_config_virtwho_interval }}"
+        hypervisor_type: "libvirt"
+        hypervisor_server: "{{ rhis_sat_config_virtwho_hypervisor_server }}"
+        hypervisor_id: "hostname"
+        organization_id: "{{ _virtwho_org.organization.id }}"
+  no_log: true
+  tags:
+    - tags_sat_config_virtwho
+
+- name: "List existing virt-who configurations"
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/foreman_virt_who_configure/api/v2/configs"
+    method: "GET"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    status_code: 200
+  register: _virtwho_list
+  no_log: true
+  tags:
+    - tags_sat_config_virtwho
+
+- name: "Resolve existing virt-who config id"
+  ansible.builtin.set_fact:
+    _virtwho_config_id: >-
+      {{
+        _virtwho_list.json.results
+        | selectattr('name', 'equalto', rhis_sat_config_virtwho_name)
+        | map(attribute='id')
+        | list
+        | first
+      }}
+  no_log: true
+  tags:
+    - tags_sat_config_virtwho
+
+- name: "Create virt-who config when missing"
+  when: (_virtwho_config_id | default('') | string | length) == 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/foreman_virt_who_configure/api/v2/configs"
+    method: "POST"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body: "{{ _virtwho_payload }}"
+    body_format: json
+    status_code: 201
+  register: _virtwho_create
+  no_log: true
+  tags:
+    - tags_sat_config_virtwho
+
+- name: "Update virt-who config when existing"
+  when: (_virtwho_config_id | default('') | string | length) > 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/foreman_virt_who_configure/api/v2/configs/{{
+      _virtwho_config_id }}/"
+    method: "PUT"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body: "{{ _virtwho_payload }}"
+    body_format: json
+    status_code: 200
+  register: _virtwho_update
+  no_log: true
+  tags:
+    - tags_sat_config_virtwho

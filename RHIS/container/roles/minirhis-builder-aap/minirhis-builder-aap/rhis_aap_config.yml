@@ -1,0 +1,84 @@
+---
+# rhis_aap_config.yml
+# Standalone entry playbook — configure RHIS Builder projects, credentials,
+# inventory, job templates, and the global survey workflow in an already-running
+# AAP Controller instance.
+#
+# Usage (local mode):
+#   ansible-playbook \
+#     --inventory  /path/to/hosts.yml \
+#     --vault-password-file ~/.ansible/conf/.vaultpass.txt \
+#     --extra-vars @~/.ansible/conf/env.yml \
+#     container/roles/minirhis-builder-aap/minirhis-builder-aap/rhis_aap_config.yml
+#
+# Tags available:
+#   rhis_aap_credential_types   — only custom credential types
+#   rhis_aap_credentials        — only credentials
+#   rhis_aap_inventory          — only inventory + inventory source
+#   rhis_aap_projects           — only SCM projects
+#   rhis_aap_templates          — only job templates
+#   rhis_aap_survey             — only global survey workflow template
+
+- name: "Configure RHIS Builder objects in AAP Controller"
+  hosts: "platform_installer"
+  become: true
+
+  vars:
+    # Allow callers to override the roles_path so the role can always be found
+    # whether this playbook runs from the container context or locally.
+    ansible_roles_path: >-
+      {{
+        (playbook_dir + '/../../..')
+        + ':' +
+        (playbook_dir + '/../../../..')
+        + ':' +
+        '/minirhis'
+      }}
+
+  tasks:
+    - name: "Load vault variables (file)"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+
+    - name: "Load other variables (file)"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+
+    - name: "Load vault variables (directory)"
+      when: vault_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vault_dir }}"
+
+    - name: "Load other variables (directory)"
+      when: vars_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vars_dir }}"
+
+    - name: "Resolve AAP connection facts"
+      ansible.builtin.set_fact:
+        aap_platform_host: >-
+          {{ aap_platform_host | default('https://' + (ansible_host |
+          default(inventory_hostname))) }}
+        aap_platform_username: >-
+          {{ aap_platform_username | default(aap_admin_user | default(admin_user
+          | default('admin'))) }}
+        aap_platform_password: >-
+          {{ aap_platform_password | default(aap_admin_password |
+          default(global_admin_password | default(''))) }}
+        aap_validate_certs: "{{ aap_validate_certs | default(false) | bool }}"
+      changed_when: false
+      tags: always
+
+    - name: "Configure RHIS Builder objects in AAP"
+      ansible.builtin.include_role:
+        name: minirhis_aap_config
+      tags:
+        - rhis_aap_config
+        - rhis_aap_credential_types
+        - rhis_aap_credentials
+        - rhis_aap_inventory
+        - rhis_aap_projects
+        - rhis_aap_templates
+        - rhis_aap_survey

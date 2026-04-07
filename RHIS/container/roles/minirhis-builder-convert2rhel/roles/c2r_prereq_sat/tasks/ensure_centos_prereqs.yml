@@ -1,0 +1,98 @@
+---
+
+# Fix Satellite configurations for CentOS systems
+
+# currently there is little difference between fix CentOS and Oracle except file names,
+# however we are using separate tasks for now just in case...
+
+- name: "Ensure CentOS-archive.repo is present"
+  ansible.builtin.copy:
+    dest: "/etc/yum.repos.d/CentOS-archive.repo"
+    content: |
+      [base]
+      name=CentOS-$releasever - Base
+      baseurl=http://vault.centos.org/centos/7.9.2009/os/x86_64/
+      enabled=1
+      gpgcheck=1
+      gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+    mode: "0644"
+
+- name: "Ensure old repo files are absent as their contents no longer exist"
+  ansible.builtin.file:
+    name: "{{ item }}"
+    state: absent
+  loop:
+    - "/etc/yum.repos.d/CentOS-Base.repo"
+    - "/etc/yum.repos.d/CentOS-CR.repo"
+    - "/etc/yum.repos.d/CentOS-Debuginfo.repo"
+    - "/etc/yum.repos.d/CentOS-fasttrack.repo"
+    - "/etc/yum.repos.d/CentOS-Media.repo"
+    - "/etc/yum.repos.d/CentOS-Sources.repo"
+    - "/etc/yum.repos.d/CentOS-Vault.repo"
+    - "/etc/yum.repos.d/CentOS-x86_64-kernel.repo"
+
+- name: "Cleanup the yum metadata" # noqa command-instead-of-module
+  ansible.builtin.command: "yum clean all"
+  register: cleanall_result
+  changed_when: cleanall_result.rc == 0
+
+- name: "Make sure that rhn-client-tools is NOT installed"
+  ansible.builtin.yum:
+    name: "rhn-client-tools"
+    state: absent
+
+- name: "Permanently exclude rhn-client-tools"
+  ansible.builtin.lineinfile:
+    path: "/etc/yum.conf"
+    insertafter: "EOF"
+    line: "exclude=rhn-client-tools"
+
+- name: "Ensure subscription-manager is installed"
+  ansible.builtin.yum:
+    name: "subscription-manager"
+    state: present
+
+- name: "Ensure we have satellite certs"
+  ansible.builtin.yum:
+    name: "{{ satellite_url }}/pub/katello-ca-consumer-latest.noarch.rpm"
+    state: present
+
+- name: "Force reregistration of the host with the new activation_key"
+  ansible.builtin.command:
+    cmd: "subscription-manager register --force --org='{{ centos_host_pre_convert_sat_org_id }}' --activationkey='{{ centos_host_pre_convert_sat_activationkey }}'" # noqa yaml[line-length]
+  register: subman_result
+  changed_when: subman_result.rc == 0
+
+- name: "Ensure CentOS-archive.repo is absent"
+  ansible.builtin.file:
+    path: "/etc/yum.repos.d/CentOS-archive.repo"
+    state: absent
+
+- name: "Clean the yum cache"
+  ansible.builtin.command: "yum clean all"
+  register: yum_clean_all_result
+  changed_when: yum_clean_all_result.rc == 0
+
+- name: "Ensure the system is patched to the latest" # noqa package-latest   we are patching everything
+  ansible.builtin.yum:
+    name: "*"
+    state: "latest"
+
+- name: "Ensure the latest kernel is set to boot by default"
+  ansible.builtin.command: "grubby --set-default-index=0"
+  register: grubby_result
+  changed_when: grubby_result.rc == 0
+
+- name: "Ensure the system reboots into the latest kernel"
+  ansible.builtin.reboot:
+    post_reboot_delay: 60
+    reboot_timeout: 3600
+
+- name: "Get the currently running kernel"
+  ansible.builtin.command: "uname -r"
+  register: uname_r_result
+  changed_when: uname_r_result.rc == 0
+
+- name: "Log the currently running kernel"
+  ansible.builtin.debug:
+    var: uname_r_result

@@ -1,0 +1,16 @@
+---
+# minirhis_vm_lifecycle/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly.
+#
+# Examples:
+#   ansible-playbook container/roles/minirhis_vm_lifecycle/run.yml -e rhis_vm_action=power_on
+#   ansible-playbook container/roles/minirhis_vm_lifecycle/run.yml -e rhis_vm_action=reboot
+#   ansible-playbook container/roles/minirhis_vm_lifecycle/run.yml \
+#       -e rhis_vm_action=set_passwords -e admin_pass=CHANGEME
+- name: RHIS VM Lifecycle Management
+  hosts: installer
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - role: minirhis_vm_lifecycle

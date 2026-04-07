@@ -1,0 +1,35 @@
+---
+# Add PKINIT to the auth types
+
+# ansible-freeipa needs info routines!
+- name: "Get the current auth types"
+  ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa user-show {{ piv_current_username }}"
+  register: user_info_result
+  changed_when: false
+
+- name: "Enable PKINIT for the user if necessary"
+  when: not (user_info_result.stdout | regex_search('(?<=User authentication types:).*$', multiline=true) | regex_search('pkinit'))
+  block:
+
+    - name: "Store the current auth types"
+      ansible.builtin.set_fact:
+        piv_user_authtypes: "{{ user_info_result.stdout | regex_search('(?<=User authentication types:).*$', multiline=true) | trim | split(', ') }}"
+
+    - name: "Add PKINIT"
+      when: piv_user_authtypes[0] != "None"
+      ansible.builtin.set_fact:
+        piv_user_authtypes: "{{ piv_user_authtypes + [ 'pkinit' ] }}"
+
+    - name: "Ensure PKINIT"
+      when: piv_user_authtypes[0] == "None"
+      ansible.builtin.set_fact:
+        piv_user_authtypes: "{{ [ 'pkinit' ] }}"
+
+    - name: "Assign auth types to user"
+      redhat.rhel_idm.ipauser:
+        action: "user"
+        ipaadmin_password: "{{ ipa_password }}"
+        ipaadmin_principal: "{{ ipa_principal }}"
+        name: "{{ piv_current_username }}"
+        userauthtype: "{{ piv_user_authtypes }}"
+        state: present

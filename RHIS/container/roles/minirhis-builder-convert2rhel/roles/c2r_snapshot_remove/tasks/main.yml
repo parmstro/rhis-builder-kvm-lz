@@ -1,0 +1,7 @@
+---
+
+# Run the snapshot task
+
+- name: "Create the lvm_snapshot on host {{ ansible_fqdn }}"
+  ansible.builtin.include_role:
+    name: "infra.lvm_snapshots.snapshot_remove"

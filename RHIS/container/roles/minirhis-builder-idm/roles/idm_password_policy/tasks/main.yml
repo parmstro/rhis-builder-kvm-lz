@@ -1,0 +1,15 @@
+---
+#
+
+- name: "Ensure the idm password policies"
+  when: idm_password_policies is defined and (idm_password_policies | length) > 0
+  ansible.builtin.include_tasks: "ensure_password_policy.yml"
+  loop: "{{ idm_password_policies }}"
+  loop_control:
+    loop_var: pwpolicy
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_password_policy

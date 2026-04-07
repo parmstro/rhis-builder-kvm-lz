@@ -1,0 +1,102 @@
+---
+# add a snapshot disk of sufficient size to the vmware host
+
+- name: "Get the current list of disks"
+  ansible.builtin.setup:
+    gather_subset:
+      - "hardware"
+
+- name: "Get the current disk list"
+  ansible.builtin.set_fact:
+    current_disk_list: "{{ hostvars[inventory_hostname].ansible_devices.keys() | map('regex_search', disk_search_pattern) | select('string') | list }}"
+
+- name: "Log the current disk device names"
+  ansible.builtin.debug:
+    var: current_disk_list
+
+# for local connection use force the use of the controllers python interpreter
+- name: "Add disk to the convert2rhel host in vmware"
+  connection: local
+  community.vmware.vmware_guest_disk:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ datacenter_name }}"
+    name: "{{ ansible_fqdn }}"
+    disk:
+      - size_gb: "{{ snapshot_disk_size_gb }}"
+        type: "{{ snapshot_disk_provision_type }}"
+        datastore: "{{ snapshot_disk_datastore }}"
+        state: "{{ snapshot_disk_state }}"
+        scsi_controller: "{{ snapshot_disk_controller }}"
+        unit_number: "{{ snapshot_disk_unit }}"
+        scsi_type: '{{ snapshot_disk_scsi_type }}'
+        disk_mode: '{{ snapshot_disk_mode }}'
+    validate_certs: "{{ validate_certs | default(false) }}"
+  register: disk_facts
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+- name: "Get the current list of disks"
+  ansible.builtin.setup:
+    gather_subset:
+      - "hardware"
+
+- name: "Output disks list"
+  ansible.builtin.set_fact:
+    new_disk_list: "{{ hostvars[inventory_hostname].ansible_devices.keys() | map('regex_search', disk_search_pattern) | select('string') | list }}"
+
+- name: "Log the new disk device name"
+  ansible.builtin.debug:
+    var: new_disk_list
+
+- name: "Set the snapshot device name"
+  ansible.builtin.set_fact:
+    new_snapshot_device: "/dev/{{ item }}"
+  loop: "{{ new_disk_list }}"
+  when: item not in current_disk_list
+
+- name: "Log the new disk device name"
+  ansible.builtin.debug:
+    var: new_snapshot_device
+
+
+- name: "Add the new disk device to the pv list for the vg"
+  ansible.builtin.set_fact:
+    current_pvs: "{{ current_pvs + [new_snapshot_device] }}"
+
+- name: "Add the new device to the vg"
+  community.general.lvg:
+    vg: "{{ snapshot_vg }}"
+    pvs: "{{ current_pvs }}"
+    reset_pv_uuid: false
+    reset_vg_uuid: false
+
+- name: "Get the device information of the new snapshot device"
+  ansible.builtin.command: "blkid -o export {{ new_snapshot_device }}"
+  register: blkid_new_result
+  changed_when: true
+
+- name: "Extract the UUID"
+  ansible.builtin.set_fact:
+    new_snapshot_device_uuid: "{{ blkid_new_result.stdout_lines[1] }}"
+
+- name: "Store the UUID on a file on the host"
+  when: new_snapshot_device_uuid != ""
+  block:
+
+    - name: "Ensure the /etc/lvm_snapshots/ directory exists"
+      ansible.builtin.file:
+        path: "/etc/lvm_snapshots/"
+        state: directory
+        mode: "0600"
+        owner: "root"
+        group: "root"
+
+    - name: "Write the new UUID to the file"
+      ansible.builtin.copy:
+        dest: "/etc/lvm_snapshots/c2r_{{ snapshot_vg }}_snapshot_disk_uuid"
+        content: "{{ new_snapshot_device_uuid }}"
+        mode: "0600"
+        owner: "root"
+        group: "root"

@@ -1,0 +1,51 @@
+---
+
+sysmessage_allowable_types:
+  - "base"
+  - "custom"
+  - "default_compliance"
+  - "cis2"
+  - "extended_cis2"
+  - "disa_stig"
+
+sysmessage_default_type: "base"
+
+sysmessage_default_base_message: |
+  All activities performed on this device are logged and monitored.
+
+sysmessage_default_cis2_message: |
+  Authorized users only. All activity may be monitored and reported.
+
+sysmessage_extended_cis2_message: |
+  **********************************************************************
+  The credentials you used to access this information system (IS) have
+  been authenticated. By remaining connected, you declare that you are
+  the authorized user of these credentials and agree to the terms of
+  use of this IS.
+
+  All activities performed on this device are logged and monitored.
+
+  Unauthorized attempts to elevate privilege or attempts to circumvent
+  system security will result in civil and/or criminal penalties.
+  **********************************************************************
+
+sysmessage_default_compliance_message: |
+  I've read & consent to terms in IS user agreem't.
+
+sysmessage_default_custom_message: "Today's message: Buy your admin a coffee!"
+
+# yamllint disable rule:line-length
+sysmessage_default_disa_stig_message: |
+  You are accessing a U.S. Government (USG) Information System (IS) that is provided for USG-authorized use only.
+
+  By using this IS (which includes any device attached to this IS), you consent to the following conditions
+
+  -The USG routinely intercepts and monitors communications on this IS for purposes including, but not limited to, penetration testing, COMSEC monitoring, network operations and defense, personnel misconduct (PM), law enforcement (LE), and counterintelligence (CI) investigations.
+
+  -At any time, the USG may inspect and seize data stored on this IS.
+
+  -Communications using, or data stored on, this IS are not private, are subject to routine monitoring, interception, and search, and may be disclosed or used for any USG-authorized purpose.
+
+  -This IS includes security measures (e.g., authentication and access controls) to protect USG interests--not for your personal benefit or privacy.
+
+  -Notwithstanding the above, using this IS does not constitute consent to PM, LE or CI investigative searching or monitoring of the content of privileged communications, or work product, related to personal representation or services by attorneys, psychotherapists, or clergy, and their assistants. Such communications and work product are private and confidential. See User Agreement for details.

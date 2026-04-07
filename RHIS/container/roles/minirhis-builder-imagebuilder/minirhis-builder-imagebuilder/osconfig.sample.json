@@ -1,0 +1,19 @@
+  {  
+    "x86_64": [
+        {
+            "name": "baseos",
+            "baseurl": "https://cdn.redhat.com/content/dist/rhel9/9/x86_64/baseos/os",
+            "gpgkey": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n...",
+            "rhsm": true,
+            "check_gpg": true
+        },
+        {
+            "name": "appstream",
+            "baseurl": "https://cdn.redhat.com/content/dist/rhel9/9/x86_64/appstream/os",
+            "gpgkey": "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n...",
+            "rhsm": true,
+            "check_gpg": true
+        }
+    ]
+  }
+  

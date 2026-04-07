@@ -1,0 +1,6 @@
+---
+
+# Given a certificate import it to a slot on the yubikey
+- name: "Import the piv certificate into the yubikey"
+  ansible.builtin.shell: "ykman piv certificates import --management-key {{ piv_management_key }} --pin {{ piv_initial_pin }} --verify {{ piv_slot }} {{ piv_tmp_secure_dir }}/{{ piv_current_username }}-piv-9a-certificate.crt"
+  no_log: false

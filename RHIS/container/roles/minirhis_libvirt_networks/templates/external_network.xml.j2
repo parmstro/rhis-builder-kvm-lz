@@ -1,0 +1,10 @@
+<network>
+  <name>{{ rhis_external_network_name }}</name>
+  <forward mode='{{ rhis_external_mode }}'/>
+  <bridge name='{{ rhis_external_bridge }}' stp='on' delay='0'/>
+  <ip address='{{ rhis_external_ip }}' netmask='{{ rhis_external_netmask }}'>
+    <dhcp>
+      <range start='{{ rhis_external_dhcp_start }}' end='{{ rhis_external_dhcp_end }}'/>
+    </dhcp>
+  </ip>
+</network>

@@ -1,0 +1,37 @@
+---
+# tasks/configure_hostgroups.yml — rhis_sat_config
+# Creates Management and Compute host groups for each RHEL major.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure host group is present"
+      redhat.satellite.hostgroup:
+        name: "{{ rhis_sat_config_hostgroup_name_prefix }}{{ item.0 }}_{{
+          item.1.name_suffix }}"
+        architecture: "x86_64"
+        operatingsystem: "RedHat {{ item.0 }}"
+        ptable: "Kickstart default thin"
+        medium: "RHEL_{{ item.0 }}_x86_64"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        subnet: "Provisioning_Net"
+        domain: "{{ rhis_sat_config_domain }}"
+        ansible_roles: "{{ item.1.ansible_roles | default(omit) }}"
+        compute_resource: "{{ (item.1.with_compute | default(false) | bool) |
+          ternary(rhis_sat_config_compute_resource.name, omit) }}"
+        compute_profile: "{{ (item.1.with_compute | default(false) | bool) |
+          ternary(rhis_sat_config_compute_profile_name, omit) }}"
+        state: present
+      loop: "{{ rhis_sat_config_rhel_majors |
+        product(rhis_sat_config_hostgroup_classes) | list }}"
+      no_log: true
+      tags:
+        - tags_sat_config_hostgroups

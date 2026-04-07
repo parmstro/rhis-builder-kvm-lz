@@ -1,0 +1,98 @@
+---
+
+# prepare to generate the installer template and copy it to target
+# launch the installer
+- name: "Ensure the .ssh directory exists"
+  ansible.builtin.file:
+    path: "/{{ current_user.home }}/.ssh/"
+    state: directory
+    owner: "{{ current_user.name }}"
+    group: "{{ current_user.name }}"
+    mode: "0700"    # required .ssh mode
+  loop:
+    - name: "root"
+      home: "root"
+    - name: "{{ rhis_builder_default_user }}"
+      home: "/home/{{ rhis_builder_default_user }}"
+  loop_control:
+    loop_var: current_user
+
+- name: "Create a key pair if required"
+  community.crypto.openssh_keypair:
+    path: "/root/.ssh/id_rsa"
+    type: "ed25519"
+    state: present
+    group: "root"
+    owner: "root"
+    mode: "0600"    # required public key mode
+
+- name: "Read the public keys"
+  ansible.builtin.slurp:
+    path: "/root/.ssh/id_rsa.pub"
+  register: remote_public_key
+
+# These files get cleaned up at the end of the run
+- name: "Copy the keys to {{ rhis_builder_default_user }}"
+  ansible.builtin.copy:
+    src: "/root/.ssh/{{ ssh_file }}"
+    dest: "/home/{{ rhis_builder_default_user }}/.ssh/{{ ssh_file }}"
+    owner: "{{ rhis_builder_default_user }}"
+    group: "{{ rhis_builder_default_user }}"
+    mode: "0600"
+    remote_src: true
+  loop:
+    - id_rsa
+    - id_rsa.pub
+  loop_control:
+    loop_var: ssh_file
+
+# it doesn't really matter if it is an rsa key file or a ed25519 file but the name has to be standard
+# for standard commands to pick it up, using our custom name means we have to pass -i to every ssh call
+# so we are calling the file "/root/.ssh/id_rsa"
+- name: "Create the authorized key file on the aap host if it does not exist"
+  ansible.builtin.file:
+    path: "{{ current_user.home }}/.ssh/authorized_keys"
+    state: touch
+    owner: "{{ current_user.name }}"
+    group: "{{ current_user.name }}"
+    mode: "0700"    # required .ssh mode
+  loop:
+    - name: "root"
+      home: "/root"
+    - name: "{{ rhis_builder_default_user }}"
+      home: "/home/{{ rhis_builder_default_user }}"
+  loop_control:
+    loop_var: current_user
+
+- name: "Add our public key to the authorized key file on the aap host"
+  ansible.builtin.blockinfile:
+    block: "{{ remote_public_key.content | b64decode }}"
+    path: "{{ current_user.home }}/.ssh/authorized_keys"
+    state: present
+    owner: "{{ current_user.name }}"
+    group: "{{ current_user.name }}"
+    mode: "0600"
+  loop:
+    - name: "root"
+      home: "/root"
+    - name: "{{ rhis_builder_default_user }}"
+      home: "/home/{{ rhis_builder_default_user }}"
+  loop_control:
+    loop_var: current_user
+
+- name: "Test the connection"
+  ansible.builtin.command: "ssh -o StrictHostKeyChecking=no {{ current_user }}@{{ ansible_fqdn }} 'echo Killroy_was_here'"
+  delegate_to: "{{ groups['platform_installer'][0] }}"
+  register: result
+  changed_when: result.rc == 0
+  loop:
+    - "root"
+    - "{{ rhis_builder_default_user }}"
+  loop_control:
+    loop_var: current_user
+
+- name: "Assert we were there"
+  ansible.builtin.assert:
+    that:
+      - result.results[0].stdout == "Killroy_was_here"
+      - result.results[0].stdout == "Killroy_was_here"

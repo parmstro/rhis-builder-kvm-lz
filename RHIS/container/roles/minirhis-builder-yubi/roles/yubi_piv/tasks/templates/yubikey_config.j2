@@ -1,0 +1,30 @@
+---
+# This template will provide the output for configuration run for provide
+# It will be stored as an encypted file in the secure directory or in an IdM Vault
+
+yubikey_info:
+  piv_device_type: "{{ piv_device_type }}"
+  piv_device_serial: "{{ piv_device_serial }}"
+  piv_device_fw_ver: "{{ piv_device_fw_ver }}"
+  piv_device_formfactor: "{{ piv_device_formfactor }}"
+  piv_device_if_usb: "{{ piv_device_if_usb }}"
+  piv_device_nfc_enabled: "{{ piv_device_nfc_enabled }}"
+  piv_device_ch_principal: "{{ piv_current_username }}"
+  piv_management_key: "{{ piv_management_key }}"
+  piv_initial_pin: "{{ piv_initial_pin }}"
+  piv_initial_puk: "{{ piv_initial_puk }}"
+  piv_current_username: "{{ piv_current_username }}"
+  piv_current_realm: "{{ piv_current_realm }}"
+  piv_current_user_csr_subject: "{{ piv_current_user_csr_subject }}"
+  piv_initial_cert_serial: "{{ piv_initial_cert_serial }}"
+  piv_initial_password: "{{ piv_initial_password }}"
+  piv_version: "{{ piv_version }}"
+  piv_pin_retries_remaining: "{{ piv_pin_retries_remaining }}"
+  piv_mgmt_key_algorithm: "{{ piv_mgmt_key_algorithm }}"
+  piv_chuid: "{{ piv_chuid }}"
+  piv_ccc: "{{ piv_ccc }}" 
+  piv_slot_9a: "{{ piv_slot_9a }}"
+  piv_private_key_file: "{{ piv_private_key_file }}"
+  piv_public_key_file: "{{ piv_public_key_file }}"
+  piv_csr_file: "{{ piv_csr_file }}"
+  piv_certificate_file: "{{ piv_certificate_file }}"

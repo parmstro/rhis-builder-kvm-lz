@@ -1,0 +1,75 @@
+---
+
+# The challenge, reliably and idempotently add an LVM snapshot disk to a virtual machine
+- name: "Assume that we need a disk"
+  ansible.builtin.set_fact:
+    need_disk: true
+
+- name: "Discover the current pvs in the vg"
+  ansible.builtin.command: "pvdisplay -C -o pv_name -S vgname={{ snapshot_vg }} --no-headings"
+  register: pvdisplay_result
+  changed_when: false
+
+- name: "Get the list of pvs"
+  ansible.builtin.set_fact:
+    current_pvs: "{{ pvdisplay_result.stdout_lines | map('trim') }}"
+
+- name: "Log the list of pvs"
+  ansible.builtin.debug:
+    var: current_pvs
+
+- name: "Set the snapshot_vg_disk_uuid_file path"
+  ansible.builtin.set_fact:
+    snapshot_vg_disk_uuid_file: "/etc/lvm_snapshots/c2r_{{ snapshot_vg }}_snapshot_disk_uuid"
+
+- name: "Determine if there is an existing c2r_snapshot_disk"
+  ansible.builtin.stat:
+    path: "{{ snapshot_vg_disk_uuid_file }}"
+  register: c2r_stat
+
+- name: "If there is an existing c2r snapshot disk file for this vg"
+  when: c2r_stat.stat.exists
+  block:
+    # Determine if it still exists in the vg
+    - name: "Read the UUID from the file"
+      ansible.builtin.command: "cat {{ snapshot_vg_disk_uuid_file }}"
+      register: command_result
+      changed_when: true
+
+    - name: "Set snapshot_disk_uuid"
+      ansible.builtin.set_fact:
+        snapshot_disk_uuid: "{{ command_result.stdout | replace('UUID=', '') }}"
+
+    - name: "Log the UUID"
+      ansible.builtin.debug:
+        var: snapshot_disk_uuid
+
+    - name: "Determine the pv name of the snapshot disk"
+      ansible.builtin.command: "blkid -U {{ snapshot_disk_uuid }}"
+      register: blkid_result
+      ignore_errors: true
+      changed_when: false
+
+    - name: "If we found the snapshot device path"
+      when: blkid_result.stdout != ""
+      block:
+
+        - name: "Determine of the device is in the current vg"
+          ansible.builtin.set_fact:
+            need_disk: false
+          loop: "{{ current_pvs }}"
+          when: item == blkid_result.stdout
+
+    - name: "If the snapshot disk is not found on the system by blkid, fail"
+      when: blkid_result.stdout == ""
+      ansible.builtin.fail:
+        msg: |
+          "A snapshot UUID file was found at {{ snapshot_vg_disk_uuid_file }}"
+          "No disk with {{ snapshot_disk_uuid }} was found on the system"
+          "The system state is inconsistent. Failing with SNAPSHOT_DISK_MISSING"
+
+
+# If we got this far, either we need a disk or found a disk
+- name: "Add a new disk to the system if we need one"
+  when: need_disk
+  ansible.builtin.include_tasks: "add_snapshot_disk.yml"

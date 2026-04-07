@@ -1,0 +1,49 @@
+---
+# rhis_vm_lifecycle/tasks/reboot.yml
+# Issues a graceful ACPI reboot for each running RHIS VM,
+# falling back to hard reset if the graceful reboot fails.
+
+- name: Gather VM states before reboot
+  ansible.builtin.command: virsh domstate {{ item }}
+  loop: "{{ rhis_vms }}"
+  register: vm_states_pre
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Request graceful reboot (ACPI) for running VMs
+  ansible.builtin.command: virsh reboot {{ item.item }}
+  loop: "{{ vm_states_pre.results }}"
+  when:
+    - item.rc == 0
+    - "'running' in (item.stdout | default(''))"
+  register: vm_reboot
+  failed_when: false
+  become: true
+
+- name: Hard reset any VM where graceful reboot failed
+  ansible.builtin.command: virsh reset {{ item.item }}
+  loop: "{{ vm_reboot.results | default([]) }}"
+  when:
+    - item.rc is defined
+    - item.rc != 0
+  register: vm_reset
+  failed_when: false
+  become: true
+
+- name: Wait {{ rhis_vm_reboot_settle_sec }}s for VMs to begin restarting
+  ansible.builtin.pause:
+    seconds: "{{ rhis_vm_reboot_settle_sec }}"
+
+- name: Verify VMs are running after reboot
+  ansible.builtin.command: virsh domstate {{ item }}
+  loop: "{{ rhis_vms }}"
+  register: vm_states_post
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Report post-reboot VM states
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ item.stdout | trim }}"
+  loop: "{{ vm_states_post.results }}"

@@ -1,0 +1,6 @@
+---
+# rhis_vm_lifecycle/tasks/main.yml
+# Dispatches to the correct sub-task file based on rhis_vm_action.
+
+- name: "VM lifecycle: {{ rhis_vm_action }} on {{ rhis_vms | join(', ') }}"
+  ansible.builtin.include_tasks: "{{ rhis_vm_action }}.yml"

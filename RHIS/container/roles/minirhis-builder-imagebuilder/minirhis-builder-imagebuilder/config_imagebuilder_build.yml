@@ -1,0 +1,10 @@
+---
+
+- name: "Configure imagebuilder build environment"
+  hosts: all
+  become: true
+  become_method: ansible.builtin.sudo
+  gather_facts: true
+
+  roles:
+    - soe-image-config-ib

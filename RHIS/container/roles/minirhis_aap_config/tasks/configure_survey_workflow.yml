@@ -1,0 +1,56 @@
+---
+# tasks/configure_survey_workflow.yml — minirhis_aap_config
+# Creates the global "RHIS | Deploy New Environment" workflow template with a
+# comprehensive survey.  The survey collects all environment-specific
+# parameters (hostnames, IPs, passwords, tokens, CDN keys) and passes them as
+# extra_vars to downstream templates via the workflow.
+#
+# Workflow node sequence (post-survey):
+#   1. rhis-builder-interview  — optional onboarding / vault population
+#   2. rhis-builder-idm        — IdM / FreeIPA setup
+#   3. rhis-builder-satellite  — Satellite deployment
+#   4. rhis-builder-aap        — AAP (re-)configuration post-build
+#
+# Additional single-project workflow templates are created per rhis-* project
+# so operators can re-run individual stages with the same survey.
+
+# ── Main deployment workflow ─────────────────────────────────────────────────
+- name: "RHIS AAP Config | Ensure global survey workflow template"
+  ansible.controller.workflow_job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ aap_config_survey_workflow.name }}"
+    description: "{{ aap_config_survey_workflow.description | default(omit) }}"
+    organization: "{{ aap_config_survey_workflow.organization |
+      default(aap_config_organization) }}"
+    inventory: "{{ aap_config_survey_workflow.inventory | default(omit) }}"
+    ask_variables_on_launch: "{{ aap_config_survey_workflow.ask_variables_on_launch | default(true) }}"
+    survey_enabled: "{{ aap_config_survey_workflow.survey_enabled | default(true) }}"
+    survey_spec: "{{ aap_config_survey_workflow.survey_spec }}"
+    state: "{{ aap_config_survey_workflow.state | default('present') }}"
+
+# ── Per-project "run with survey" workflow templates ─────────────────────────
+# Each rhis-* project that has a corresponding job template gets its own
+# lightweight workflow template so users can invoke it with the survey prompt.
+- name: "RHIS AAP Config | Ensure per-project survey workflow — '{{ tmpl.name }}'"
+  ansible.controller.workflow_job_template:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ tmpl.name }} (Survey)"
+    description: >-
+      Survey-driven launch of '{{ tmpl.name }}'. Collects environment parameters
+      before running the job template.
+    organization: "{{ tmpl.organization | default(aap_config_organization) }}"
+    inventory: "{{ tmpl.inventory | default('RHIS Builder Inventory') }}"
+    ask_variables_on_launch: true
+    survey_enabled: true
+    survey_spec: "{{ aap_config_survey_workflow.survey_spec }}"
+    state: present
+  loop: "{{ aap_config_templates }}"
+  loop_control:
+    loop_var: tmpl
+    label: "{{ tmpl.name }}"

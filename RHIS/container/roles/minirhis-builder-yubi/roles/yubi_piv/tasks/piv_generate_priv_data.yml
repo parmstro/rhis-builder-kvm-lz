@@ -1,0 +1,41 @@
+---
+# This task generates the private keys and CSR for the user
+
+# Create your own function to generate a psuedo random password here...
+- name: "Generate a reasonably difficult temporary random password"
+  ansible.builtin.command: "{{ piv_random_password_generator }}"
+  register: random_output
+
+- name: "Store the random password"
+  ansible.builtin.set_fact:
+    piv_initial_password: "{{ random_output.stdout }}"
+
+- name: "Save the password in the users vault"
+  ansible.builtin.command: "echo {{ piv_initial_password }} > {{ piv_tmp_secure_dir }}/{{ piv_current_username }}.pwd"
+
+- name: "Validate the public exponent"
+  ansible.builtin.set_fact:
+    pubexp_modulo: "{{ piv_RSA_private_key_pubexp % 2 }}"
+
+- name: "Validate the requested configuration"
+  ansible.builtin.assert:
+    that:
+      - piv_RSA_private_key_outform == "PEM"
+      - piv_RSA_private_key_algorithm == "RSA"
+      - piv_RSA_private_key_cipher == "aes-256-cbc"
+      - piv_RSA_private_key_size == 2048 or piv_RSA_private_key_size == 3072 or piv_RSA_private_key_size == 4096
+      - pubexp_modulo != "0"
+      - piv_RSA_private_key_pubexp > 65536
+
+- name: "Generate a key"
+  ansible.builtin.shell: "openssl genpkey -outform {{ piv_RSA_private_key_outform }} -algorithm {{ piv_RSA_private_key_algorithm }} -pass pass:{{ piv_initial_password }} -{{ piv_RSA_private_key_cipher }} -pkeyopt rsa_keygen_bits:{{ piv_RSA_private_key_size }} -pkeyopt rsa_keygen_pubexp:{{ piv_RSA_private_key_pubexp }} -out {{ piv_tmp_private_key_file }} -outpubkey {{ piv_tmp_public_key_file }}"
+  register: genpkey_result
+  no_log: true
+
+- name: "Store private key"
+  ansible.builtin.shell: "ykman piv keys import --pin {{ piv_initial_pin }} --management-key {{ piv_management_key }} --pin-policy {{ piv_pin_policy }} --touch-policy {{ piv_touch_policy }} --password {{ piv_initial_password }} {{ piv_slot }} {{ piv_tmp_private_key_file }}"
+  no_log: true
+
+- name: "Create the CSR for the current user"
+  ansible.builtin.shell: "openssl req -new -key {{ piv_tmp_private_key_file }} -passin pass:{{ piv_initial_password }} -out {{ piv_tmp_csr_file }} -subj {{ piv_current_user_csr_subject }}" 
+  no_log: false

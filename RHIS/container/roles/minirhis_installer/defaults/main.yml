@@ -1,0 +1,7 @@
+---
+# Defaults for mini_rhis_installer role
+rhis_container_name: "rhis-provisioner"
+satellite_content_profile_path: "/rhis/vars/host_vars/satellite_content_profile.yml"
+lifecycle_tasks_path: "/rhis/rhis-builder-satellite/roles/lifecycle_environments/tasks/main.yml"
+# Demo/offline admin password - must be set via vault or env before use
+demo_admin_password: "{{ sat_admin_pass }}"

@@ -1,0 +1,27 @@
+---
+# tasks/configure_projects.yml — minirhis_aap_config
+# Creates one AAP Project per rhis-* GitHub repository from parmstro.
+
+- name: "RHIS AAP Config | Ensure project '{{ proj.name }}'"
+  ansible.controller.project:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ proj.name }}"
+    description: "{{ proj.description | default(omit) }}"
+    organization: "{{ proj.organization | default(aap_config_organization) }}"
+    scm_type: "{{ proj.scm_type | default('git') }}"
+    scm_url: "{{ proj.scm_url }}"
+    scm_branch: "{{ proj.scm_branch | default('main') }}"
+    scm_clean: "{{ proj.scm_clean | default(true) }}"
+    scm_delete_on_update: "{{ proj.scm_delete_on_update | default(false) }}"
+    scm_update_on_launch: "{{ proj.scm_update_on_launch | default(true) }}"
+    credential: "{{ proj.credential | default('RHIS GitHub SCM') }}"
+    state: "{{ proj.state | default('present') }}"
+    wait: "{{ proj.wait | default(true) }}"
+  loop: "{{ aap_config_projects }}"
+  loop_control:
+    loop_var: proj
+    label: "{{ proj.name }}"
+  no_log: false

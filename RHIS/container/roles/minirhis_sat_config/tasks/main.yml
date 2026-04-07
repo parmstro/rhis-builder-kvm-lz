@@ -1,0 +1,79 @@
+---
+# tasks/main.yml — rhis_sat_config
+# Orchestrates all Satellite post-install configuration tasks.
+
+- name: "RHIS_sat_config | 2. Configure Hammer & Insights settings"
+  ansible.builtin.include_tasks: configure_settings.yml
+  tags:
+    - tags_sat_config_settings
+
+- name: "RHIS_sat_config | 3. Configure provisioning infrastructure"
+  ansible.builtin.include_tasks: configure_provisioning.yml
+  tags:
+    - tags_sat_config_provisioning
+
+- name: "RHIS_sat_config | 4. Validate image + kickstart provisioning readiness"
+  ansible.builtin.include_tasks: configure_provisioning_modes.yml
+  tags:
+    - tags_sat_config_provisioning_modes
+
+- name: "RHIS_sat_config | 5. Enable repository sets"
+  ansible.builtin.include_tasks: configure_repository_sets.yml
+  tags:
+    - tags_sat_config_repos
+
+- name: "RHIS_sat_config | 6. Upload SCAP content"
+  ansible.builtin.include_tasks: configure_scap.yml
+  tags:
+    - tags_sat_config_scap
+
+- name: "RHIS_sat_config | 7. Configure custom content"
+  ansible.builtin.include_tasks: configure_custom_content.yml
+  tags:
+    - tags_sat_config_content
+
+- name: "RHIS_sat_config | 8. Configure operating systems and templates"
+  ansible.builtin.include_tasks: configure_operating_systems.yml
+  tags:
+    - tags_sat_config_os
+
+- name: "RHIS_sat_config | 9. Configure lifecycle + content views + activation keys"
+  ansible.builtin.include_tasks: configure_lifecycle_content.yml
+  tags:
+    - tags_sat_config_lifecycle
+    - tags_sat_config_content
+
+- name: "RHIS_sat_config | 10. Configure compute resources & profiles"
+  ansible.builtin.include_tasks: configure_compute.yml
+  tags:
+    - tags_sat_config_compute
+
+- name: "RHIS_sat_config | 11. Configure virt-who"
+  ansible.builtin.include_tasks: configure_virtwho.yml
+  tags:
+    - tags_sat_config_virtwho
+
+- name: "RHIS_sat_config | 12. Import ansible roles into Satellite"
+  ansible.builtin.include_tasks: configure_ansible_roles.yml
+  tags:
+    - tags_sat_config_ansible_roles
+
+- name: "RHIS_sat_config | 13. Create host groups"
+  ansible.builtin.include_tasks: configure_hostgroups.yml
+  tags:
+    - tags_sat_config_hostgroups
+
+- name: "RHIS_sat_config | 14. Configure reporting and compliance scheduling"
+  ansible.builtin.include_tasks: configure_reporting_compliance.yml
+  tags:
+    - tags_sat_config_reporting
+
+- name: "RHIS_sat_config | 15. Enable RH cloud mismatched-host auto-delete"
+  ansible.builtin.include_tasks: configure_rhcloud_cleanup.yml
+  tags:
+    - tags_sat_config_rhcloud
+
+- name: "RHIS_sat_config | 11. Synchronize all products"
+  ansible.builtin.include_tasks: sync_repos.yml
+  tags:
+    - tags_sat_config_sync

@@ -1,0 +1,14 @@
+---
+
+- name: "Ensuring the state of habac rule - {{ idm_hbac_rule.name }}"
+  redhat.rhel_idm.ipahbacrule:
+    ipaadmin_principal: "{{ ipa_admin_principal }}"
+    ipaadmin_password: "{{ ipa_admin_password }}"
+    name: "{{ idm_hbac_rule.name }}"
+    description: "{{ idm_hbac_rule.description }}"
+    state: "{{ idm_hbac_rule.state | default(omit) }}"
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_hbac_policy

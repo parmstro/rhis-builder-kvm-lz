@@ -1,0 +1,20 @@
+---
+
+# Ensure that we can log realm-capsule user is know to the system.
+# Otherwise the systemd-tmpfile-setup.service will fail on unknown user
+
+- name: "Get the user information for satellite user"
+  ansible.builtin.command: "getent passwd realm-capsule"
+  register: getent_passwd_result
+  changed_when: getent_passwd_result.rc == 0
+
+- name: "Get the group information for satellite user"
+  ansible.builtin.command: "getent group realm-capsule"
+  register: getent_group_result
+  changed_when: getent_group_result.rc == 0
+
+- name: "Ensure satellite user temp dir is created"
+  ansible.builtin.systemd:
+    service: "systemd-tmpfiles-setup.service"
+    state: "started"
+  notify: Final_Reboot

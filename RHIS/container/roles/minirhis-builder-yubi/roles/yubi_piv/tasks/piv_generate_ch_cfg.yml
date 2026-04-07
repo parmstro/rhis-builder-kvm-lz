@@ -1,0 +1,8 @@
+---
+# generate the PIV cardholder data
+
+- name: "Generate the Card Holder Unique IDentifier"
+  ansible.builtin.command: 'ykman piv objects generate --management-key {{ piv_management_key }} "CHUID"'
+
+- name: "Generate the Card Capability Container"
+  ansible.builtin.command: 'ykman piv objects generate --management-key {{ piv_management_key }} "CCC"'

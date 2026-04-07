@@ -1,0 +1,1 @@
+2025-11-20 [Paul Armstrong] We need to evaluate the group_vars and host_vars in this repo still. Leaving them in place until that occurs later in this cycle

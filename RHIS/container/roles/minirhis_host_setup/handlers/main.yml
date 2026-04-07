@@ -1,0 +1,9 @@
+---
+# rhis_host_setup/handlers/main.yml
+
+- name: Reload polkit
+  ansible.builtin.systemd:
+    name: polkit
+    state: reloaded
+  become: true
+  listen: Reload polkit

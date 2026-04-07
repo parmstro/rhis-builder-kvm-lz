@@ -1,0 +1,19 @@
+---
+
+# this role cleans up the disk that we added to our virtual machine previously in snapshot_prepare
+
+# this should be easier as we stored the vg UUID and other stuff in a file on the host
+
+- name: "Get the list of unique vgs that we need to remove the snapshot disks from"
+  ansible.builtin.set_fact:
+    snapshot_vgs: "{{ snapshot_create_volumes | selectattr('vg', 'defined') | map(attribute='vg') | unique | list }}"
+
+- name: "Log the list of vgs to cleanup"
+  ansible.builtin.debug:
+    msg: "snapshot_vgs: {{ snapshot_vgs }}"
+
+- name: "Discover the existing disks on the system - in case things changed"
+  ansible.builtin.include_tasks: "discover_disks.yml"
+  loop: "{{ snapshot_vgs }}"
+  loop_control:
+    loop_var: snapshot_vg

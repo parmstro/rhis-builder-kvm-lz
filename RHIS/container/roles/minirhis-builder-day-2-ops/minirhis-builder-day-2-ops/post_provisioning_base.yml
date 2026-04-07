@@ -1,0 +1,18 @@
+---
+# This play uses the motd role to update the motd page
+# for the target systems
+#
+- name: "Apply the post-provisioning configuration"
+  hosts: all
+  become: true
+
+  tasks:
+    - name: "Info:"
+      ansible.builtin.debug:
+        msg: Post Provisioning Setup
+
+  roles:
+    - time
+    - cockpit # sysmessage puts a file in cockpit dir.
+    - sysmessage
+    - cockpit_cert

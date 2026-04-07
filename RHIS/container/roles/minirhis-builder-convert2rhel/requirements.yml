@@ -1,0 +1,9 @@
+---
+
+collections:
+  - name: infra.convert2rhel
+  - name: infra.lvm_snapshots
+  # VMware tasks in this role tree use both vmware.vmware and
+  # community.vmware module namespaces.
+  - name: vmware.vmware
+  - name: community.vmware

@@ -1,0 +1,65 @@
+---
+
+# Use the template to generate a file to store in the vault or write to a secure directory.
+# Then delete all the temporary data
+- name: "Create a secure directory for the user data"
+  ansible.builtin.file: 
+    path: "{{ piv_vault_dir}}/{{ piv_current_username }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "Copy the private key"
+  ansible.builtin.copy:
+    src: "{{ piv_tmp_private_key_file }}"
+    dest: "{{ piv_private_key_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: "Copy the public key"
+  ansible.builtin.copy:
+    src: "{{ piv_tmp_public_key_file }}"
+    dest: "{{ piv_public_key_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: "Copy the csr"
+  ansible.builtin.copy:
+    src: "{{ piv_tmp_csr_file }}"
+    dest: "{{ piv_csr_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: "Copy the certificate"
+  ansible.builtin.copy:
+    src: "{{ piv_tmp_certificate_file }}"
+    dest: "{{ piv_certificate_file }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: "Template our backup data"
+  ansible.builtin.template:
+    src: yubikey_config.j2
+    dest: "{{ piv_current_username_vault_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: "Ensure that certmonger starts-tracking the new certificate for autorenewals" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+  ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa-getcert start-tracking -k {{ piv_private_key_file }} -f {{ piv_certificate_file }} -I {{ piv_current_username }}"
+  no_log: true
+
+- name: "Delete the working directory information"
+  ansible.builtin.command: "rm -rf {{ piv_tmp_secure_dir }}"
+
+- name: "Share the initial configuration with the provisioned "idm_user"
+  ansible.builtin.include_tasks: "piv_vault_user_data.yml"

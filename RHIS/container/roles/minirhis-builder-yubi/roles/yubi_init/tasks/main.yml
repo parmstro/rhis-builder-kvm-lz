@@ -1,0 +1,49 @@
+---
+# This role initializes a yubikey to factory defaults
+# for use with other roles in this collection
+# we want to ensure a properly reprovisioned yubikey
+
+- name: "Initialize the OAUTH application"
+  when: reset_oauth
+  ansible.builtin.command: "sudo ykman oath reset --force"
+  register: init_oauth_result
+
+- name: "The result of the OAUTH reset request is:"
+  when: reset_oauth
+  ansible.builtin.debug:
+    var: init_oauth_result
+    
+- name: "Initialize the openpgp application"
+  when: reset_openpgp
+  ansible.builtin.command: "sudo ykman openpgp reset --force"
+  register: init_openpgp_result
+
+- name: "The result of the openpgp reset request is:"
+  when: reset_openpgp
+  ansible.builtin.debug:
+    var: init_openpgp_result
+    
+- name: "Initialize the otp application"
+  when: reset_otp
+  ansible.builtin.shell: "sudo ykman otp delete --force 1; sudo ykman otp delete --force 2"
+  register: init_otp_result
+
+- name: "The result of the otp reset request is:"
+  when: reset_otp
+  ansible.builtin.debug:
+    var: init_otp_result
+    
+- name: "Initialize the PIV application"
+  when: reset_piv
+  ansible.builtin.command: "sudo ykman piv reset --force"
+  register: init_piv_result
+
+- name: "The result of the PIV request is:"
+  when: reset_piv
+  ansible.builtin.debug:
+    var: init_piv_result
+
+- name: "Fido reinitialization requires you to remove reinsert and then touch the yubikey."
+  when: reset_fido
+  ansible.builtin.debug:
+    msg: "This command requires human interaction.\nPlease run 'ykman fido reset' manually"

@@ -1,0 +1,45 @@
+---
+# tasks/configure_scap.yml — rhis_sat_config
+# Bulk-uploads default SCAP content for the organization.
+
+- name: "Bulk upload default SCAP content for {{ satellite_organization }}"
+  tags:
+    - tags_sat_config_scap
+  block:
+    - name: "Bulk upload default SCAP content via API"
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/scap_content/bulk_upload"
+        method: POST
+        user: "{{ satellite_username | default(omit) }}"
+        password: "{{ satellite_password | default(omit) }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs | default(false) }}"
+        body_format: json
+        body:
+          type: default
+          organization: "{{ satellite_organization }}"
+          location: "{{ satellite_location }}"
+        status_code:
+          - 200
+          - 201
+          - 202
+      register: _scap_upload
+  rescue:
+    - name: "Fallback: Bulk upload default SCAP content via hammer (consolidated
+        include)"
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir
+          }}/container/roles/rhis_tools/tasks/hammer_api_fallback.yml"
+      vars:
+        api_path: "scap_content"
+        search_expr: >-
+          organization="{{ satellite_organization }}" type=default
+        hammer_cmd: >-
+          hammer scap-content bulk-upload --type default --organization "{{
+          satellite_organization }}" --location "{{ satellite_location }}"
+
+    - name: "Map fallback result to _scap_upload"
+      ansible.builtin.set_fact:
+        _scap_upload: "{{ fallback_result }}"
+      changed_when: false
+      no_log: false

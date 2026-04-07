@@ -1,0 +1,49 @@
+---
+# Install prerequeiste packages and configuration
+
+- name: "Install MariaDB packages for RHEL9"
+  when: ansible_distribution_major_version == "9"
+  ansible.builtin.dnf:
+    name:
+      - "mariadb-server"
+      - "mariadb-server-utils"
+      - "python3-PyMySQL"
+    state: "present"
+
+- name: Install MariaDB AppStreams for RHEL 8
+  when: ansible_distribution_major_version == "8"
+  ansible.builtin.dnf:
+    name:
+      - "@mariadb:10.3/server"
+    state: present
+
+- name: Ensure firewalld has been started in order to add rules
+  ansible.builtin.service:
+    name: "firewalld"
+    state: "started"
+    enabled: true
+
+- name: "Add firewall rule for mysql port {{ mysql_port }}"
+  ansible.posix.firewalld:
+    port: "{{ mysql_port }}/{{ mysql_port_protocol }}"
+    permanent: true
+    immediate: true
+    state: "enabled"
+
+- name: "Configure SELinux to allow mysql port {{ mysql_port }}"
+  when: ansible_distribution_major_version == "8"
+  ansible.builtin.command:
+    cmd: "semanage port -a -t mysqld_port_t -p {{ mysql_port_protocol }} {{ mysql_port }}"
+  register: seport_result
+  changed_when: seport_result.rc == 0
+
+- name: "Configure SELinux to allow mysql port {{ mysql_port }}"
+  when: ansible_distribution_major_version > "8"
+  ansible.builtin.include_role:
+    name: "redhat.rhel_system_roles.selinux"
+  vars:
+    selinux_ports:
+      - ports: "{{ mysql_port }}"
+        proto: "{{ mysql_port_protocol }}"
+        setype: "mysqld_port_t"
+        state: "present"

@@ -1,0 +1,118 @@
+---
+
+# pre convert Remediations for Oracle Linux systems registered to Satellite
+
+- name: "Remove out of date packages that will not be upgraded and do not exist"
+  ansible.builtin.yum:
+    name:
+      - btrfs-progs
+      - iproute
+      - xfsprogs
+    state: absent
+
+- name: "Remove the standard oracle linux yum repos because they no longer work"
+  ansible.builtin.file:
+    path: "/etc/yum.repos.d/{{ item }}"
+    state: "absent"
+  loop:
+    - "oracle-linux-ol7.repo"
+    - "uek-ol7.repo"
+    - "virt-ol7.repo"
+
+- name: "Get a gpg key"
+  ansible.builtin.command:  # noqa command-instead-of-module
+    cmd: "curl https://vault.centos.org/RPM-GPG-KEY-CentOS-7 -o /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7"
+  register: curl_result
+  changed_when: curl_result.rc == 0
+
+- name: "Import the gpgkey"
+  ansible.builtin.command:  # noqa command-instead-of-module
+    cmd: "rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7"
+  register: rpm_result
+  changed_when: rpm_result.rc == 0
+
+- name: "Ensure CentOS-archive.repo is present"
+  ansible.builtin.copy:
+    dest: "/etc/yum.repos.d/CentOS-archive.repo"
+    content: |
+      [base]
+      name=CentOS-$releasever - Base
+      baseurl=http://vault.centos.org/centos/7.9.2009/os/x86_64/
+      enabled=1
+    mode: "0644"
+
+- name: "Clean the yum cache"
+  ansible.builtin.command: "yum clean all"
+  register: yum_clean_all_result
+  changed_when: yum_clean_all_result.rc == 0
+
+- name: "Make sure that rhn-client-tools is NOT installed"
+  ansible.builtin.yum:
+    name: "rhn-client-tools"
+    state: absent
+
+- name: "Permanently exclude rhn-client-tools"
+  ansible.builtin.lineinfile:
+    path: "/etc/yum.conf"
+    insertafter: "EOF"
+    line: "exclude=rhn-client-tools"
+
+- name: "Ensure subscription-manager is installed"
+  ansible.builtin.yum:
+    name: "subscription-manager"
+    state: present
+
+- name: "Ensure we have satellite certs"
+  ansible.builtin.yum:
+    name: "{{ satellite_url }}/pub/katello-ca-consumer-latest.noarch.rpm"
+    state: present
+
+- name: "Force reregistration of the host with the new activation_key"
+  ansible.builtin.command:
+    cmd: "subscription-manager register --force --org='{{ oel_host_pre_convert_sat_org_id }}' --activationkey='{{ oel_host_pre_convert_sat_activationkey }}'"
+  register: subman_result
+  changed_when: subman_result.rc == 0
+
+- name: "Ensure CentOS-archive.repo is absent"
+  ansible.builtin.file:
+    path: "/etc/yum.repos.d/CentOS-archive.repo"
+    state: absent
+
+- name: "Clean the yum cache"
+  ansible.builtin.command: "yum clean all"
+  register: yum_clean_all_result
+  changed_when: yum_clean_all_result.rc == 0
+
+- name: "Ensure the system is patched to the latest" # noqa package-latest   we are patching everything
+  ansible.builtin.yum:
+    name: '*'
+    state: "latest"
+
+- name: "Ensure the latest kernel is set to boot by default"
+  ansible.builtin.command: "grubby --set-default-index=0"
+  register: grubby_result
+  changed_when: grubby_result.rc == 0
+
+- name: "Ensure the system reboots into the Oracle Red Hat compatible kernel"
+  ansible.builtin.reboot:
+    reboot_timeout: 3600
+
+- name: "Get the currently running kernel"
+  ansible.builtin.command: "uname -r"
+  register: uname_r_result
+  changed_when: uname_r_result.rc == 0
+
+- name: "Log the currently running kernel"
+  ansible.builtin.debug:
+    var: uname_r_result
+
+- name: "Disable unsupported_kernel_modules"
+  when: unsupported_kernel_modules is defined and (unsupported_kernel_modules | length) > 0
+  community.general.modprobe:
+    name: "{{ module }}"
+    persistent: absent
+    state: absent
+  loop: "{{ unsupported_kernel_modules }}"
+  loop_control:
+    loop_var: module
+  notify: "Reboot_host"

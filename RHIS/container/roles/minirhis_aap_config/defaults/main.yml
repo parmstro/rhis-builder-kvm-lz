@@ -1,0 +1,1333 @@
+---
+# defaults/main.yml — minirhis_aap_config
+# Provides idiomatic defaults for the RHIS AAP Controller configuration role.
+# Values resolve from RHIS host_vars / vault-sourced env.yml; these are fallbacks.
+
+# ─── AAP Controller connection ─────────────────────────────────────────────
+aap_config_platform_host: "{{ aap_platform_host | default('https://' +
+  (ansible_host | default(inventory_hostname))) }}"
+aap_config_username: "{{ aap_platform_username | default(aap_admin_user |
+  default(admin_user | default('admin'))) }}"
+aap_config_password: "{{ aap_platform_password | default(aap_admin_password |
+  default(global_admin_password | default(''))) }}"
+aap_config_validate_certs: "{{ aap_validate_certs | default(false) | bool }}"
+aap_config_organization: "{{ aap_organization | default('Default') }}"
+aap_config_ee_name: "{{ aap_default_ee | default('Default execution environment') }}"
+
+# Path to the minirhis-managed SSH private key (generated during VM provisioning).
+# Falls back to the user's default RSA key when the minirhis key is absent.
+aap_config_ssh_key_path: >-
+  {{
+    lookup('first_found', dict(files=[
+      (playbook_dir + '/../vars/ssh/id_rsa'),
+      '~/.ssh/minirhis-installer/id_rsa',
+      '~/.ssh/id_rsa'
+    ]))
+  }}
+
+aap_config_vault_pass_path: "{{ ansible_vault_password_file | default('~/.ansible/conf/.vaultpass.txt') }}"
+
+# ─── Custom Credential Types ────────────────────────────────────────────────
+# The injector templates use AWX-native {{ field_id }} syntax (evaluated at
+# job run-time by AAP, not by Ansible).  The !unsafe tag prevents Ansible from
+# interpreting them during the configuration playbook itself.
+aap_config_credential_types:
+  - name: "Red Hat CDN"
+    kind: "cloud"
+    description: "Red Hat Customer Portal / CDN access (username, password, offline token)"
+    inputs:
+      fields:
+        - id: rh_username
+          type: string
+          label: "Red Hat Username"
+          secret: false
+        - id: rh_password
+          type: string
+          label: "Red Hat Password"
+          secret: true
+        - id: rh_offline_token
+          type: string
+          label: "Red Hat Offline Token"
+          secret: true
+          multiline: true
+      required:
+        - rh_username
+        - rh_password
+    injectors:
+      extra_vars:
+        rh_user: !unsafe "{{ rh_username }}"
+        rh_pass: !unsafe "{{ rh_password }}"
+        rh_offline_token: !unsafe "{{ rh_offline_token }}"
+
+  - name: "RHIS Platform Installer"
+    kind: "cloud"
+    description: "Variables injected into RHIS deployment templates (domain, realm,
+      org, IPs)"
+    inputs:
+      fields:
+        - id: rhis_domain
+          type: string
+          label: "Domain (e.g. prod.spg)"
+          secret: false
+        - id: rhis_realm
+          type: string
+          label: "Kerberos Realm (e.g. PROD.SPG)"
+          secret: false
+        - id: rhis_sat_org
+          type: string
+          label: "Satellite Organization"
+          secret: false
+        - id: rhis_sat_loc
+          type: string
+          label: "Satellite Location"
+          secret: false
+        - id: rhis_sat_hostname
+          type: string
+          label: "Satellite FQDN"
+          secret: false
+        - id: rhis_aap_hostname
+          type: string
+          label: "AAP FQDN"
+          secret: false
+        - id: rhis_idm_hostname
+          type: string
+          label: "IdM FQDN"
+          secret: false
+        - id: rhis_cdn_org_id
+          type: string
+          label: "CDN Organization ID"
+          secret: false
+        - id: rhis_cdn_activation_key
+          type: string
+          label: "CDN / Satellite Activation Key"
+          secret: false
+      required:
+        - rhis_domain
+    injectors:
+      extra_vars:
+        domain: !unsafe "{{ rhis_domain }}"
+        realm: !unsafe "{{ rhis_realm }}"
+        sat_org: !unsafe "{{ rhis_sat_org }}"
+        sat_loc: !unsafe "{{ rhis_sat_loc }}"
+        sat_hostname: !unsafe "{{ rhis_sat_hostname }}"
+        aap_hostname: !unsafe "{{ rhis_aap_hostname }}"
+        idm_hostname: !unsafe "{{ rhis_idm_hostname }}"
+        cdn_organization_id: !unsafe "{{ rhis_cdn_org_id }}"
+        cdn_sat_activation_key: !unsafe "{{ rhis_cdn_activation_key }}"
+
+# ─── Credentials ─────────────────────────────────────────────────────────────
+# SCOPE: MiniRHIS infrastructure operator credentials only.
+# These credentials are used exclusively by RHIS playbooks to install and
+# maintain the Satellite / AAP / IdM nodes themselves.
+# They are sourced from the operator's ~/.ansible/conf/env.yml vault file.
+#
+# Customer / project credentials are NOT defined here.  Each customer gets
+# their own isolated credential set created by the onboarding workflow:
+#   "RHIS | Customer | Onboard New Environment"
+# which writes ~/.ansible/conf/customers/<CUSTOMER>-<ENV>.yml and calls
+# provision_customer_credentials.yml to create <CUSTOMER>-<ENV> * in AAP.
+aap_config_credentials:
+  # --- Machine Credential ---------------------------------------------------
+  - name: "RHIS Machine Credential"
+    credential_type: "Machine"
+    description: "SSH + sudo access for all RHIS-managed nodes (Satellite, AAP, IdM)"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      username: "{{ admin_user | default('admin') }}"
+      password: "{{ admin_pass | default(global_admin_password | default('')) }}"
+      ssh_key_data: "{{ lookup('file', aap_config_ssh_key_path) }}"
+      become_method: "sudo"
+      become_password: "{{ admin_pass | default(global_admin_password | default('')) }}"
+
+  # --- Vault Credential -----------------------------------------------------
+  - name: "RHIS Vault Credential"
+    credential_type: "Vault"
+    description: "Ansible Vault decryption password for RHIS encrypted variables"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      vault_password: "{{ lookup('file', aap_config_vault_pass_path) }}"
+
+  # --- Source Control (GitHub, public repos) --------------------------------
+  - name: "RHIS GitHub SCM"
+    credential_type: "Source Control"
+    description: "Source Control credential for parmstro GitHub repositories (public)"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      username: ""
+      password: ""
+
+  # --- Red Hat CDN ----------------------------------------------------------
+  - name: "RHIS Red Hat CDN"
+    credential_type: "Red Hat CDN"
+    description: "Red Hat Customer Portal / subscription access for all RHIS nodes"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      rh_username: "{{ rh_user | default('') }}"
+      rh_password: "{{ rh_pass | default('') }}"
+      rh_offline_token: "{{ rh_offline_token | default('') }}"
+
+  # --- Automation Hub Token -------------------------------------------------
+  - name: "RHIS Automation Hub Token"
+    credential_type: "Ansible Galaxy/Automation Hub API Token"
+    description: "console.redhat.com Automation Hub offline token for collection downloads"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      url: "https://console.redhat.com/api/automation-hub/"
+      auth_url: "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-c\
+        onnect/token"
+      token: "{{ hub_token | default(vault_console_redhat_token | default('')) }}"
+
+  # --- Red Hat Registry -----------------------------------------------------
+  - name: "RHIS Red Hat Registry"
+    credential_type: "Container Registry"
+    description: "registry.redhat.io pull credential for execution environment images"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      host: "registry.redhat.io"
+      username: "{{ rh_user | default('') }}"
+      password: "{{ rh_pass | default('') }}"
+      verify_ssl: true
+
+  # --- RHIS Platform Installer Vars -----------------------------------------
+  - name: "RHIS Environment Variables"
+    credential_type: "RHIS Platform Installer"
+    description: "Default RHIS environment topology values (domain, realm,
+      hostnames, org, activation key)"
+    organization: "{{ aap_config_organization }}"
+    inputs:
+      rhis_domain: "{{ domain | default('prod.spg') }}"
+      rhis_realm: "{{ realm | default('PROD.SPG') }}"
+      rhis_sat_org: "{{ sat_org | default('REDHAT') }}"
+      rhis_sat_loc: "{{ sat_loc | default('CORE') }}"
+      rhis_sat_hostname: "{{ sat_hostname | default('satellite.prod.spg') }}"
+      rhis_aap_hostname: "{{ aap_hostname | default('aap.prod.spg') }}"
+      rhis_idm_hostname: "{{ idm_hostname | default('idm.prod.spg') }}"
+      rhis_cdn_org_id: "{{ cdn_organization_id | default('') }}"
+      rhis_cdn_activation_key: "{{ cdn_sat_activation_key | default('') }}"
+
+# ─── Inventories ─────────────────────────────────────────────────────────────
+aap_config_inventories:
+  - name: "RHIS Builder Inventory"
+    description: "Dynamic inventory managed by rhis-builder-inventory across all
+      RHIS deployment targets"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+# ─── Inventory Sources ───────────────────────────────────────────────────────
+aap_config_inventory_sources:
+  - name: "RHIS Inventory — SCM"
+    inventory: "RHIS Builder Inventory"
+    source: scm
+    source_project: "rhis-builder-inventory"
+    source_path: "inventory/"
+    scm_branch: "main"
+    credential: "RHIS GitHub SCM"
+    update_on_launch: true
+    overwrite: true
+    overwrite_vars: true
+    description: "SCM-backed inventory sourced from parmstro/rhis-builder-inventory"
+    state: present
+
+# ─── Projects ────────────────────────────────────────────────────────────────
+# One project per public rhis-* repository (parmstro GitHub).
+aap_config_projects:
+  - name: "rhis-builder"
+    description: "Core RHIS infrastructure provisioner"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-inventory"
+    description: "RHIS dynamic inventory definitions"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-inventory.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-aap"
+    description: "Ansible Automation Platform build and configuration for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-aap.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-satellite"
+    description: "Red Hat Satellite deployment and configuration for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-satellite.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-idm"
+    description: "Red Hat Identity Management (IdM/FreeIPA) configuration for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-idm.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-ansible-ee"
+    description: "Ansible Execution Environment definitions for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-ansible-ee.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-baremetal-init"
+    description: "Bare-metal host initialisation for RHIS deployments"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-baremetal-init.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-convert2rhel"
+    description: "Convert2RHEL automation for RHIS managed environments"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-convert2rhel.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-day-2-ops"
+    description: "Day-2 operations roles and workflows for RHIS-managed infrastructure"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-day-2-ops.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-imagebuilder"
+    description: "Image Builder deployment and Satellite integration for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-imagebuilder.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-interview"
+    description: "RHIS user interview / environment onboarding and vault configuration"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-interview.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-keycloak"
+    description: "Keycloak identity provider configuration for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-keycloak.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-kvm"
+    description: "KVM hypervisor build and Satellite connection for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-kvm.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-kvm-lz"
+    description: "KVM Landing Zone bootstrap for RHIS on KVM"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-kvm-lz.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-nbde"
+    description: "Tang/Clevis NBDE deployment for RHIS container hosts"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-nbde.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-ocp-upi"
+    description: "OpenShift Container Platform UPI deployment for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-ocp-upi.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-pipelines"
+    description: "RHIS Satellite content testing and day-2 management pipelines"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-pipelines.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-quadlet-deploy"
+    description: "Podman Quadlet deployment and configuration role for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-quadlet-deploy.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-quay"
+    description: "Red Hat Quay registry deployment for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-quay.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-yubi"
+    description: "YubiKey / PIV integration with IdM for RHIS"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-yubi.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-vault-SAMPLE"
+    description: "Reference vault variable definitions for RHIS deployments"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-vault-SAMPLE.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-builder-example.ca"
+    description: "Generated sample / dev-test-demo environment for rhis-builder"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-builder-example.ca.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhis-provisioner-container"
+    description: "MiniRHIS provisioner container build sources"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhis-provisioner-container.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "rhisam"
+    description: "Red Hat Infrastructure Standard Adoption Model documentation"
+    scm_type: git
+    scm_url: "https://github.com/parmstro/rhisam.git"
+    scm_branch: main
+    scm_update_on_launch: true
+    credential: "RHIS GitHub SCM"
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+# ─── Job Templates ───────────────────────────────────────────────────────────
+# Standard template per deployable project.  Templates that have no runnable
+# playbook (docs-only repos) are limited to check mode.  The survey workflow
+# is the recommended entry point for new environment deployments.
+aap_config_templates:
+  - name: "RHIS | Build | rhis-builder"
+    description: "Run the core rhis-builder provisioner against the RHIS Builder Inventory"
+    project: "rhis-builder"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-satellite"
+    description: "Deploy and configure Satellite for RHIS"
+    project: "rhis-builder-satellite"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-idm"
+    description: "Deploy and configure IdM (FreeIPA) for RHIS"
+    project: "rhis-builder-idm"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-aap"
+    description: "Build and configure AAP for RHIS"
+    project: "rhis-builder-aap"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-kvm-lz"
+    description: "Bootstrap KVM Landing Zone for RHIS on KVM"
+    project: "rhis-builder-kvm-lz"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-kvm"
+    description: "Build KVM hypervisors and connect them to Satellite"
+    project: "rhis-builder-kvm"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Build | rhis-builder-baremetal-init"
+    description: "Bare-metal host initialisation for RHIS"
+    project: "rhis-builder-baremetal-init"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-ansible-ee"
+    description: "Build Ansible Execution Environments for RHIS"
+    project: "rhis-builder-ansible-ee"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat Registry"
+      - "RHIS Automation Hub Token"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-convert2rhel"
+    description: "Run Convert2RHEL conversion automation"
+    project: "rhis-builder-convert2rhel"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Red Hat CDN"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Day2 | rhis-builder-day-2-ops"
+    description: "Day-2 operations against RHIS-managed infrastructure"
+    project: "rhis-builder-day-2-ops"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-imagebuilder"
+    description: "Deploy Image Builder and connect to Satellite"
+    project: "rhis-builder-imagebuilder"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Onboard | rhis-builder-interview"
+    description: "Run the RHIS interview to collect environment config and vault it"
+    project: "rhis-builder-interview"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-keycloak"
+    description: "Configure Keycloak IdP for RHIS SSO"
+    project: "rhis-builder-keycloak"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-nbde"
+    description: "Deploy Tang/Clevis NBDE for RHIS container hosts"
+    project: "rhis-builder-nbde"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-ocp-upi"
+    description: "Deploy OpenShift Container Platform (UPI) for RHIS"
+    project: "rhis-builder-ocp-upi"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Day2 | rhis-builder-pipelines"
+    description: "RHIS satellite content and operations pipeline templates"
+    project: "rhis-builder-pipelines"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-quadlet-deploy"
+    description: "Deploy and configure Podman Quadlets for RHIS"
+    project: "rhis-builder-quadlet-deploy"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-quay"
+    description: "Deploy Red Hat Quay registry for RHIS"
+    project: "rhis-builder-quay"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+  - name: "RHIS | Configure | rhis-builder-yubi"
+    description: "YubiKey / PIV integration with IdM for RHIS"
+    project: "rhis-builder-yubi"
+    playbook: "main.yml"
+    inventory: "RHIS Builder Inventory"
+    credentials:
+      - "RHIS Machine Credential"
+      - "RHIS Vault Credential"
+      - "RHIS Environment Variables"
+    execution_environment: "{{ aap_config_ee_name }}"
+    ask_variables_on_launch: true
+    survey_enabled: false
+    organization: "{{ aap_config_organization }}"
+    state: present
+
+# ─── Global Environment Survey Workflow ──────────────────────────────────────
+# This workflow template collects all environment-specific parameters via an
+# AAP survey and feeds them into the per-project build templates. It is the
+# recommended entry point for deploying a new RHIS environment from scratch.
+aap_config_survey_workflow:
+  name: "RHIS | Deploy New Environment"
+  description: >-
+    Global survey-driven workflow for standing up a new RHIS environment.
+    Collects hostnames, IPs, credentials, and deployment parameters via survey
+    and passes them to the appropriate build templates in sequence.
+  organization: "{{ aap_config_organization }}"
+  inventory: "RHIS Builder Inventory"
+  ask_variables_on_launch: true
+  survey_enabled: true
+  state: present
+  survey_spec:
+    name: "RHIS Environment Configuration Survey"
+    description: "Provide environment-specific details for your new RHIS deployment"
+    spec:
+      # ----- Environment Identity -------------------------------------------
+      - question_name: "Environment Domain"
+        question_description: "DNS domain for this environment (e.g. prod.example.com)"
+        required: true
+        type: text
+        variable: domain
+        min: 3
+        max: 253
+        default: "prod.spg"
+
+      - question_name: "Kerberos Realm"
+        question_description: "Kerberos / IdM realm in uppercase (e.g. PROD.EXAMPLE.COM)"
+        required: true
+        type: text
+        variable: realm
+        min: 3
+        max: 253
+        default: "PROD.SPG"
+
+      - question_name: "Satellite Organization"
+        question_description: "Name of the Satellite organization to create or target"
+        required: true
+        type: text
+        variable: sat_org
+        min: 1
+        max: 128
+        default: "REDHAT"
+
+      - question_name: "Satellite Location"
+        question_description: "Name of the Satellite location"
+        required: true
+        type: text
+        variable: sat_loc
+        min: 1
+        max: 128
+        default: "CORE"
+
+      # ----- Satellite Node -------------------------------------------------
+      - question_name: "Satellite Hostname (FQDN)"
+        question_description: "Fully qualified domain name for the Satellite server"
+        required: true
+        type: text
+        variable: sat_hostname
+        min: 3
+        max: 253
+        default: "satellite.prod.spg"
+
+      - question_name: "Satellite IP Address"
+        question_description: "IPv4 address of the Satellite node"
+        required: true
+        type: text
+        variable: sat_ip
+        min: 7
+        max: 15
+        default: "10.168.128.1"
+
+      - question_name: "Satellite Admin Password"
+        question_description: "Initial/current admin password for Satellite"
+        required: true
+        type: password
+        variable: sat_admin_pass
+        min: 8
+        max: 128
+        default: ""
+
+      # ----- AAP Node -------------------------------------------------------
+      - question_name: "AAP Hostname (FQDN)"
+        question_description: "Fully qualified domain name for the Ansible Automation Platform node"
+        required: true
+        type: text
+        variable: aap_hostname
+        min: 3
+        max: 253
+        default: "aap.prod.spg"
+
+      - question_name: "AAP IP Address"
+        question_description: "IPv4 address of the AAP node"
+        required: true
+        type: text
+        variable: aap_ip
+        min: 7
+        max: 15
+        default: "10.168.128.2"
+
+      - question_name: "AAP Admin Password"
+        question_description: "Admin password for the AAP controller and gateway"
+        required: true
+        type: password
+        variable: aap_admin_pass
+        min: 8
+        max: 128
+        default: ""
+
+      # ----- IdM Node -------------------------------------------------------
+      - question_name: "IdM Hostname (FQDN)"
+        question_description: "Fully qualified domain name for the IdM (FreeIPA) server"
+        required: true
+        type: text
+        variable: idm_hostname
+        min: 3
+        max: 253
+        default: "idm.prod.spg"
+
+      - question_name: "IdM IP Address"
+        question_description: "IPv4 address of the IdM node"
+        required: true
+        type: text
+        variable: idm_ip
+        min: 7
+        max: 15
+        default: "10.168.128.3"
+
+      - question_name: "IdM Admin Password"
+        question_description: "Admin (ipaadmin) password for the IdM server"
+        required: true
+        type: password
+        variable: ipaadmin_password
+        min: 8
+        max: 128
+        default: ""
+
+      - question_name: "IdM Directory Services Password"
+        question_description: "Directory Manager (DS) password for IdM"
+        required: true
+        type: password
+        variable: ipadm_password
+        min: 8
+        max: 128
+        default: ""
+
+      # ----- Global Admin ---------------------------------------------------
+      - question_name: "Global Admin Username"
+        question_description: "Common administrative username across all RHIS nodes"
+        required: true
+        type: text
+        variable: admin_user
+        min: 1
+        max: 64
+        default: "admin"
+
+      - question_name: "Global Admin Password"
+        question_description: "Shared admin password for all RHIS-managed services"
+        required: true
+        type: password
+        variable: global_admin_password
+        min: 8
+        max: 128
+        default: ""
+
+      # ----- Red Hat Credentials --------------------------------------------
+      - question_name: "Red Hat Username"
+        question_description: "customer.portal.redhat.com account username (email)"
+        required: true
+        type: text
+        variable: rh_user
+        min: 3
+        max: 256
+        default: ""
+
+      - question_name: "Red Hat Password"
+        question_description: "customer.portal.redhat.com account password"
+        required: true
+        type: password
+        variable: rh_pass
+        min: 1
+        max: 256
+        default: ""
+
+      - question_name: "Red Hat Offline Token"
+        question_description: "Offline token from console.redhat.com for API access
+          (rh_offline_token)"
+        required: false
+        type: textarea
+        variable: rh_offline_token
+        min: 0
+        max: 4096
+        default: ""
+
+      - question_name: "Automation Hub Token"
+        question_description: "console.redhat.com Automation Hub offline token for
+          collection downloads"
+        required: false
+        type: textarea
+        variable: hub_token
+        min: 0
+        max: 4096
+        default: ""
+
+      # ----- CDN / Subscription ---------------------------------------------
+      - question_name: "CDN Organization ID"
+        question_description: "Red Hat subscription organization ID (numeric)"
+        required: true
+        type: text
+        variable: cdn_organization_id
+        min: 1
+        max: 32
+        default: ""
+
+      - question_name: "CDN / Satellite Activation Key"
+        question_description: "Satellite activation key for node registration
+          (cdn_sat_activation_key)"
+        required: true
+        type: text
+        variable: cdn_sat_activation_key
+        min: 1
+        max: 128
+        default: ""
+
+      # ----- Network --------------------------------------------------------
+      - question_name: "Internal Network CIDR Base"
+        question_description: "Base IP of the internal provisioning network (e.g. 10.168.0.0)"
+        required: false
+        type: text
+        variable: internal_network
+        min: 7
+        max: 15
+        default: "10.168.0.0"
+
+      - question_name: "Provisioning Network Mask"
+        question_description: "Subnet mask for the provisioning network"
+        required: false
+        type: text
+        variable: netmask
+        min: 7
+        max: 15
+        default: "255.255.0.0"
+
+      # ----- Platform Target ------------------------------------------------
+      - question_name: "Deployment Platform"
+        question_description: "Target hypervisor or cloud platform for new VM provisioning"
+        required: true
+        type: multiplechoice
+        variable: minirhis_target_platform
+        choices: "libvirt
+
+          vmware
+
+          nutanix
+
+          aws
+
+          azure
+
+          gcp
+
+          baremetal"
+        default: "libvirt"
+
+# ─── Customer / Per-Project Environment Onboarding ───────────────────────────
+# Operator-facing workflow that creates a fully isolated credential set in AAP
+# for each new customer or project environment.
+#
+# Flow:
+#   1. Operator launches "RHIS | Customer | Onboard New Environment" workflow.
+#   2. Survey collects: customer name, environment tag, RH subscription, node
+#      topology, admin credentials.
+#   3. "Create Environment File" template writes a vault-encrypted
+#      <CUSTOMER>-<ENV>.yml to aap_config_customer_env_dir on platform_installer.
+#   4. "Provision Credentials" template loads that file and creates
+#      <CUSTOMER>-<ENV> * credentials in AAP.
+#
+# The resulting credentials are NEVER the same objects as the RHIS infra
+# credentials (RHIS *) — they cannot be used to manage MiniRHIS itself.
+
+# Directory on platform_installer where customer env vault files are stored.
+aap_config_customer_env_dir: "{{ ansible_env.HOME }}/.ansible/conf/customers"
+
+# Runtime vars — always provided via extra_vars or survey output at runtime.
+# Left empty in defaults.
+aap_customer_name: "" # e.g. "ACME"  — alphanumeric, no spaces
+aap_customer_env: "" # e.g. "PROD", "DEV", "UAT", "LAB"
+
+# When true, create a dedicated AAP Organization named after the customer.
+# When false (default), credentials land in aap_config_organization.
+aap_customer_create_org: false
+
+# ─── Customer Onboarding Workflow ────────────────────────────────────────────
+aap_config_customer_onboarding_workflow:
+  name: "RHIS | Customer | Onboard New Environment"
+  description: >-
+    Interview-driven workflow for onboarding a new customer or project
+    environment.  Collects the customer's own Red Hat subscription, node
+    topology, and admin credentials via survey — completely separate from the
+    MiniRHIS operator's credentials.  Creates a vaulted <CUSTOMER>-<ENV>.yml
+    file and a matching credential set in AAP (<CUSTOMER>-<ENV> Machine, Vault,
+    CDN, Hub, Registry, Env Variables).
+  organization: "{{ aap_config_organization }}"
+  inventory: "RHIS Builder Inventory"
+  ask_variables_on_launch: false
+  survey_enabled: true
+  state: present
+  survey_spec:
+    name: "RHIS Customer Environment Onboarding Survey"
+    description: >-
+      Provide the customer/project name, environment tag, and all connection
+      details for the new deployment target.  A vaulted env file and isolated
+      AAP credential set will be created automatically.  The MiniRHIS
+      infrastructure credentials are NOT affected.
+    spec:
+      # ----- Customer identity -----------------------------------------------
+      - question_name: "Customer / Project Name"
+        question_description: >-
+          Short identifier for the customer or project.  Letters and numbers
+          only — no spaces.  Used as the credential prefix in AAP. Examples:
+          ACME, CLIENTCORP, PROJECT1, RHISDEMO
+        required: true
+        type: text
+        variable: aap_customer_name
+        min: 1
+        max: 32
+        default: ""
+
+      - question_name: "Environment Tag"
+        question_description: >-
+          Short tag that identifies this environment instance.  Combined with
+          the customer name to namespace all credentials, e.g. ACME-PROD.
+        required: true
+        type: multiplechoice
+        variable: aap_customer_env
+        choices: "PROD
+
+          DEV
+
+          STAGING
+
+          UAT
+
+          LAB
+
+          DEMO
+
+          SANDBOX"
+        default: "PROD"
+
+      # ----- Red Hat subscription --------------------------------------------
+      - question_name: "Customer Red Hat Username"
+        question_description: >-
+          Red Hat account (email) for this customer's own subscription. This is
+          NOT the MiniRHIS operator's account.
+        required: true
+        type: text
+        variable: customer_rh_user
+        min: 3
+        max: 256
+        default: ""
+
+      - question_name: "Customer Red Hat Password"
+        required: true
+        type: password
+        variable: customer_rh_pass
+        min: 1
+        max: 256
+        default: ""
+
+      - question_name: "Customer Red Hat Offline Token"
+        question_description: >-
+          Offline token from console.redhat.com for API / Automation Hub access.
+        required: false
+        type: textarea
+        variable: customer_rh_offline_token
+        min: 0
+        max: 4096
+        default: ""
+
+      - question_name: "Customer Automation Hub Token"
+        question_description: >-
+          console.redhat.com Automation Hub offline token for collection
+          downloads in this customer's environment.
+        required: false
+        type: textarea
+        variable: customer_hub_token
+        min: 0
+        max: 4096
+        default: ""
+
+      - question_name: "Customer CDN Organization ID"
+        question_description: "Red Hat subscription organization ID (numeric)"
+        required: true
+        type: text
+        variable: customer_cdn_organization_id
+        min: 1
+        max: 32
+        default: ""
+
+      - question_name: "Customer CDN / Satellite Activation Key"
+        question_description: >-
+          Satellite activation key for registering this customer's nodes.
+        required: true
+        type: text
+        variable: customer_cdn_sat_activation_key
+        min: 1
+        max: 128
+        default: ""
+
+      # ----- Admin credentials -----------------------------------------------
+      - question_name: "Customer Admin Username"
+        question_description: >-
+          Common admin username across all nodes in this customer's environment.
+        required: true
+        type: text
+        variable: customer_admin_user
+        min: 1
+        max: 64
+        default: "admin"
+
+      - question_name: "Customer Admin Password"
+        question_description: >-
+          Shared admin password for all customer-managed services (Satellite,
+          AAP, IdM).
+        required: true
+        type: password
+        variable: customer_admin_pass
+        min: 8
+        max: 128
+        default: ""
+
+      - question_name: "Customer IdM Admin Password"
+        question_description: >-
+          ipa-admin password for this customer's IdM server. Defaults to the
+          admin password if left blank.
+        required: false
+        type: password
+        variable: customer_ipaadmin_password
+        min: 0
+        max: 128
+        default: ""
+
+      - question_name: "Customer SSH Private Key"
+        question_description: >-
+          PEM-encoded SSH private key for passwordless node access. Leave blank
+          to use password authentication only.
+        required: false
+        type: textarea
+        variable: customer_ssh_key
+        min: 0
+        max: 8192
+        default: ""
+
+      # ----- Environment topology --------------------------------------------
+      - question_name: "Customer Domain"
+        question_description: >-
+          DNS domain for this customer's environment (e.g. acme-prod.example.com)
+        required: true
+        type: text
+        variable: customer_domain
+        min: 3
+        max: 253
+        default: ""
+
+      - question_name: "Customer Kerberos Realm"
+        question_description: "Kerberos / IdM realm — must be uppercase"
+        required: true
+        type: text
+        variable: customer_realm
+        min: 3
+        max: 253
+        default: ""
+
+      - question_name: "Customer Satellite Organization"
+        required: true
+        type: text
+        variable: customer_sat_org
+        min: 1
+        max: 128
+        default: ""
+
+      - question_name: "Customer Satellite Location"
+        required: true
+        type: text
+        variable: customer_sat_loc
+        min: 1
+        max: 128
+        default: "HQ"
+
+      - question_name: "Customer Satellite Hostname (FQDN)"
+        required: true
+        type: text
+        variable: customer_sat_hostname
+        min: 3
+        max: 253
+        default: ""
+
+      - question_name: "Customer Satellite IP Address"
+        required: true
+        type: text
+        variable: customer_sat_ip
+        min: 7
+        max: 15
+        default: ""
+
+      - question_name: "Customer AAP Hostname (FQDN)"
+        required: true
+        type: text
+        variable: customer_aap_hostname
+        min: 3
+        max: 253
+        default: ""
+
+      - question_name: "Customer AAP IP Address"
+        required: true
+        type: text
+        variable: customer_aap_ip
+        min: 7
+        max: 15
+        default: ""
+
+      - question_name: "Customer IdM Hostname (FQDN)"
+        required: true
+        type: text
+        variable: customer_idm_hostname
+        min: 3
+        max: 253
+        default: ""
+
+      - question_name: "Customer IdM IP Address"
+        required: true
+        type: text
+        variable: customer_idm_ip
+        min: 7
+        max: 15
+        default: ""
+
+      # ----- Vault / security ------------------------------------------------
+      - question_name: "Customer Environment Vault Password"
+        question_description: >-
+          Password used to encrypt the <CUSTOMER>-<ENV>.yml file. Leave blank to
+          use the MiniRHIS operator vault password. Providing a dedicated
+          password here gives the customer their own vault — the MiniRHIS
+          operator cannot decrypt it without this password.
+        required: false
+        type: password
+        variable: customer_vault_password
+        min: 0
+        max: 128
+        default: ""
+
+      - question_name: "Create Dedicated AAP Organization?"
+        question_description: >-
+          'true' creates a separate AAP org for this customer so all credentials
+          are scoped to them.  'false' (default) places credentials in the
+          MiniRHIS default organization.
+        required: true
+        type: multiplechoice
+        variable: aap_customer_create_org
+        choices: "false\ntrue"
+        default: "false"

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: RHIS Maintainers
+  description: "Utilities role to run API-first hammer fallback wrapper."
+  license: MIT
+  min_ansible_version: 2.9
+dependencies: []

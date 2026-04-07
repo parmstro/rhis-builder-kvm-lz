@@ -1,0 +1,4 @@
+---
+# Defaults for rhis_tools
+# Path to the wrapper script. Callers can override this if needed.
+fallback_wrapper_path: "{{ playbook_dir }}/tools/hammer_api_fallback.sh"

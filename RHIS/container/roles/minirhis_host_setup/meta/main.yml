@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rhis_host_setup
+  author: RHIS Team
+  description: >
+    Prepares the RHIS installer host: installs and enables libvirtd,
+    configures firewalld ports, applies SELinux port labels, and ensures
+    the current user can access qemu:///system via polkit.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+dependencies: []

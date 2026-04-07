@@ -1,0 +1,10 @@
+---
+
+cockpit_all: false
+cockpit_composer: false
+cockpit_dashboard: true
+cockpit_leapp: true
+cockpit_machines: false
+cockpit_podman: false
+cockpit_pcp: true
+cockpit_session_recording: false

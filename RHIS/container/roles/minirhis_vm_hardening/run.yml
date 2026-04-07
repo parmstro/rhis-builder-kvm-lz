@@ -1,0 +1,11 @@
+---
+# minirhis_vm_hardening/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly:
+#   ansible-playbook container/roles/minirhis_vm_hardening/run.yml --limit satellite
+#   ansible-playbook container/roles/minirhis_vm_hardening/run.yml  # all RHIS VMs
+- name: RHIS VM Post-Install Hardening
+  hosts: rhis_nodes
+  gather_facts: true
+  become: false
+  roles:
+    - role: minirhis_vm_hardening

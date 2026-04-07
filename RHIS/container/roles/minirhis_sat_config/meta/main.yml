@@ -1,0 +1,8 @@
+---
+
+galaxy_info:
+  author: "RHIS"
+  description: "Full Satellite post-install configuration: hammer settings, provisioning infra, lifecycle environments, custom content, compute resources, host groups, and repo sync"
+  standalone: false
+
+dependencies: []

@@ -1,0 +1,64 @@
+---
+
+# Given a csr for a piv_current_username generate a user certificate in piv_certificate_path
+
+- name: Check for an existing certificate file
+  ansible.builtin.stat:
+    path: "{{ piv_certificate_file }}"
+  register: cert_exists
+
+- name: "Cert exists and we are regenerating"
+  when: cert_exists.stat.exists
+  block:
+
+    - name: "Cert exists, regenerating, read existing cert" # noqa: command-instead-of-module no-changed-when
+      ansible.builtin.shell: "sed -n 2,$(expr $(wc -l < {{ piv_certificate_file }}) - 1)p {{ piv_certificate_file }}"
+      register: cert
+
+    - name: "Cert exists, regenerating, get cert serial number" # noqa: command-instead-of-module no-changed-when risky-shell-pipe
+      ansible.builtin.shell: "ipa cert-find --subject={{ piv_current_user_csr_subject }} | grep 'Serial number:' | cut -c18-"
+      register: serial_num
+
+    - name: "Cert exists, regenerating - stop tracking" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "ipa-getcert stop-tracking -k {{ piv_private_key_file }} -f {{ piv_csr_file }} -i {{ piv_current_username }}"
+      ignore_errors: true
+
+    - name: "Cert exists, regenerating - remove the old cert from the service" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa user-remove-cert {{ piv_current_username }} --certificate='{{ cert.stdout }}'"
+      ignore_errors: true
+      no_log: true
+
+    - name: "Revocation"
+      block:
+        - name: "Cert exists, revoke the old cert with reason 6 - certificateHold - an admin can completely revoke it later" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+          ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa cert-revoke {{ serial_num.stdout }} --revocation-reason=6"
+          register: revocation
+          when: serial_num.stdout != ""
+          no_log: true
+
+      rescue:
+        - name: "If the return code is 127, the cert didn't exist"
+          ansible.builtin.debug:
+            msg: "The certificate did not exist - continuing"
+          when: revocation.rc == "127"
+
+    - name: "Cert exists, rename old cert .revoked"
+      ansible.builtin.copy:
+        src: "{{ piv_certificate_file }}"
+        dest: "{{ piv_certificate_file }}.revoked"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+
+- name: "Get a new certificate from the IdM CA"
+  ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa cert-request --add --profile-id {{ piv_certificate_profile }} --principal='{{ piv_current_username }}@{{ piv_current_realm }}' {{ piv_tmp_csr_file }} --certificate-out={{ piv_tmp_certificate_file }}"
+  no_log: true
+
+- name: "Get the new cert serial number" # noqa: command-instead-of-module no-changed-when risky-shell-pipe
+  ansible.builtin.shell: "ipa cert-find --subject={{ piv_current_user_csr_subject }} | grep 'Serial number:' | cut -c18-"
+  register: serial_num
+
+- name: "Store the serial number"
+  ansible.builtin.set_fact:
+    piv_initial_cert_serial: "{{ serial_num.stdout }}"

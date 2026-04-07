@@ -1,0 +1,20 @@
+---
+# vmw_revert_snapshot.yml
+
+- name: Revert snapshots for the list of hosts
+  hosts: all
+  vars_files:
+  - vars/vault.yml
+  - vars/main.yml
+  vars:
+    current_state: revert
+
+  tasks:
+  - include_tasks: tasks/snapshot_action.yml
+    loop: "{{ host_list }}"
+
+  - set_fact:
+      current_state: present
+
+  - include_tasks: tasks/power_action.yml
+    loop: "{{ host_list }}"

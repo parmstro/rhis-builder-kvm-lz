@@ -1,0 +1,10 @@
+---
+
+- name: "Template the reps configurations for the host"
+  ansible.builtin.template:
+    src: "{{ repo_template }}.j2"
+    dest: "/etc/yum.repos.d/{{ repo_template }}"
+    mode: "0644"
+  loop: "{{ repo_templates }}"
+  loop_control:
+    loop_var: repo_template

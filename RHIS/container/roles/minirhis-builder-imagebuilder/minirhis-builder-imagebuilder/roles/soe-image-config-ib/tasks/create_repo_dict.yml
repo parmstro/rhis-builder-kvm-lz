@@ -1,0 +1,16 @@
+---
+
+# Get the enabled list of repositories on the system
+# Create a dictionary
+# Insert the repo urls
+
+- name: "List the enabled repos"
+  ansible.builtin.command: "subscription-manager repos --list-enabled"
+  register: result
+  changed_when: true
+
+- name: "Process enabled repos"
+  ansible.builtin.include_tasks: "process_repos.yml"
+  loop: "{{ result.stdout_lines | list }}"
+  loop_control:
+    loop_var: line

@@ -1,0 +1,11 @@
+---
+# rhis_libvirt_networks/handlers/main.yml
+
+- name: Clean up network XML temps
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/rhis_external_network.xml
+    - /tmp/rhis_internal_network.xml
+  listen: Clean up network XML temps

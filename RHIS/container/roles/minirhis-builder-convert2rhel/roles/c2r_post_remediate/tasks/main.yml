@@ -1,0 +1,4 @@
+---
+
+- name: "Ensure the satellite user is found"
+  ansible.builtin.include_tasks: "ensure_satellite_user.yml"

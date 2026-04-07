@@ -1,0 +1,13 @@
+---
+# minirhis_ssh_mesh/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly.
+# Must target ALL hosts in one play so public-key facts are globally visible.
+#
+# Example:
+#   ansible-playbook container/roles/minirhis_ssh_mesh/run.yml
+- name: RHIS SSH Trust Mesh Bootstrap
+  hosts: installer:rhis_nodes
+  gather_facts: true
+  serial: 1 # Collect single-host facts before distributing keys
+  roles:
+    - role: minirhis_ssh_mesh

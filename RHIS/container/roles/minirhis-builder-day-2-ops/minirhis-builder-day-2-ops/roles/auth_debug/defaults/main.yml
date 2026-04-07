@@ -1,0 +1,63 @@
+---
+
+# default vars for debugging configuration
+
+# the default we will set everything to when we want to debug sssd authentication/authorization
+# allowable values 0-9
+# normal level is 2 - serious failures - you know something is broken
+# level 6 is good debugging data (configuration level problems)
+# level 8 is very detailed debugging data (code level problems)
+auth_debug_default_debug_level: 6
+auth_debug_default_normal_level: 2
+auth_debug_global_persistence: false
+auth_debug_global_state: "present"
+
+# the following are used to set the individual sections of sssd configuration
+# to a debug level. We default to setting all the knobs to 6
+# you can tweak this in your var file
+auth_debug_sssd_modules:
+  - name: domain
+    domain: "{{ ansible_domain }}"
+    section: "\\[domain/{{ ansible_domain }}\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: sssd
+    section: "\\[sssd\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: nss
+    section: "\\[nss\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: pam
+    section: "\\[pam\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: sudo
+    section: "\\[sudo\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: ssh
+    section: "\\[ssh\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+  - name: pac
+    section: "\\[pac\\]"
+    debug_level: "{{ auth_debug_default_debug_level }}"
+    persistent: "{{ auth_debug_global_persistence }}"
+    state: "{{ auth_debug_global_state }}"
+#  - name: ifp
+#    section: "\\[ifp\\]"
+#    debug_level: "{{ auth_debug_default_debug_level }}"
+#    persistent: "{{ auth_debug_global_persistence }}"
+#    state: "{{ auth_debug_global_state }}"
+#  error debug_level not allowed in session_recording section
+#  - name: "\\[session_recording\\]"
+#    debug_level: "{{ auth_debug_default_debug_level }}"
+#    state: "{{ auth_debug_global_state }}"

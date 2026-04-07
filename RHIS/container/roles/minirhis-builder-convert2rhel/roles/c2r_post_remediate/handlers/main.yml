@@ -1,0 +1,8 @@
+---
+
+# convert2rhel post conversion remediation handlers
+
+- name: "Final_Reboot"
+  ansible.builtin.reboot:
+    post_reboot_delay: 60
+    reboot_timeout: 300

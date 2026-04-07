@@ -1,0 +1,19 @@
+---
+
+# Perform the specified certificate profile action
+
+- name: "Import the certificate profile: {{ profile.idmcp_profile_name }}"
+  when: profile.idmcp_state == 'present'
+  ansible.builtin.shell:
+    cmd: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa certprofile-import {{ profile.idmcp_profile_name }} --file {{ profile.idmcp_cfg_path }} --desc '{{ profile.idmcp_descripion }}' --store {{ profile.idmcp_store }}"
+
+- name: "Delete the certificate profile: {{ profile.idmcp_profile_name }}"
+  when: profile.idmcp_state == 'updated'
+  ansible.builtin.shell:
+    cmd: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa certprofile-mod {{ profile.idmcp_profile_name }} --file {{ profile.idmcp_cfg_path }} --desc '{{ profile.idmcp_descripion }}' --store {{ profile.idmcp_store }}"
+
+- name: "Delete the certificate profile: {{ profile.idmcp_profile_name }}"
+  when: profile.idmcp_state == 'absent'
+  ansible.builtin.shell:
+    cmd: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa certprofile-del {{ profile.idmcp_profile_name }}"
+

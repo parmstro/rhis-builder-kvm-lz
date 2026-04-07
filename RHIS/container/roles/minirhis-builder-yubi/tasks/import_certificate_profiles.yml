@@ -1,0 +1,11 @@
+---
+# Basic smartcard enablement task
+- name: "Import the Smartcard certificate profiles to IdM Servers"
+  ansible.builtin.include_tasks: ensure_certificate_profile.yml
+  loop: "{{ idm_certificate_profiles }}"
+  loop_control:
+      loop_var: profile
+  vars:
+    ipa_principal: "{{ ipa_principal_username_vault }}" # noqa var-naming[no-role-prefix] these are defined by the freeipa collection
+    ipa_password: "{{ ipa_principal_password_vault }}" # noqa var-naming[no-role-prefix]
+

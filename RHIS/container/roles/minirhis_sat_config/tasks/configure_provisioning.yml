@@ -1,0 +1,76 @@
+---
+# tasks/configure_provisioning.yml — rhis_sat_config
+# Partition tables, installation media, domain, and subnet.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure partition table: {{ item.name }}"
+      redhat.satellite.partition_table:
+        name: "{{ item.name }}"
+        os_family: "{{ item.os_family }}"
+        snippet: "{{ item.snippet | default(false) }}"
+        layout: "{{ lookup('file', item.file) }}"
+        state: present
+      loop: "{{ rhis_sat_config_partition_tables }}"
+      no_log: true
+      tags:
+        - tags_sat_config_provisioning
+
+    - name: "Ensure installation media: {{ item.name }}"
+      redhat.satellite.installation_medium:
+        name: "{{ item.name }}"
+        path: "{{ item.path }}"
+        os_family: "{{ item.os_family }}"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        state: present
+      loop: "{{ rhis_sat_config_media }}"
+      no_log: true
+      tags:
+        - tags_sat_config_provisioning
+
+    - name: "Ensure domain: {{ rhis_sat_config_domain }}"
+      redhat.satellite.domain:
+        name: "{{ rhis_sat_config_domain }}"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_provisioning
+
+    - name: "Ensure provisioning subnet: Provisioning_Net"
+      redhat.satellite.subnet:
+        name: "Provisioning_Net"
+        network: "{{ rhis_sat_config_provisioning_net }}"
+        mask: "{{ rhis_sat_config_provisioning_mask }}"
+        gateway: "{{ rhis_sat_config_sat_ip }}"
+        dns_primary: "{{ rhis_sat_config_sat_ip }}"
+        ipam: "DHCP"
+        boot_mode: "DHCP"
+        from_ip: "{{ rhis_sat_config_dhcp_from }}"
+        to_ip: "{{ rhis_sat_config_dhcp_to }}"
+        dhcp_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
+        dns_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
+        tftp_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
+        discovery_proxy: "{{ sat_hostname | default('satellite.prod.spg') }}"
+        domains:
+          - "{{ rhis_sat_config_domain }}"
+        organizations:
+          - "{{ satellite_organization }}"
+        locations:
+          - "{{ satellite_location }}"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_provisioning

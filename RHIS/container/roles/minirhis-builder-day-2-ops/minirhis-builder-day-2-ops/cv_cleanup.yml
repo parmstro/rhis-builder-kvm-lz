@@ -1,0 +1,22 @@
+---
+
+- name: "Content view cleanup"
+  gather_facts: true
+  become: true
+  hosts: all
+
+  tasks:
+
+    - name: "Start cleanup"
+      ansible.builtin.include_role:
+        name: cvcleanup
+#      vars:
+#        composite_content_views:
+#          - name: SOE_AAP
+#            num_cvs_to_keep: 2
+#          - name: SOE_AAP_Developer
+#            num_cvs_to_keep: 2
+#        content_views:
+#          - name: AAP_Files
+#            num_cvs_to_keep: 3
+# Example variables for calling this role.

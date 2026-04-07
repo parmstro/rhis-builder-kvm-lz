@@ -1,0 +1,30 @@
+---
+
+# Apply some basic hardening to the IdM configuration
+
+- name: "Configure nsslapd-allow-anonymous-access"
+  block:
+    - name: "Set nsslapd-allow-anonymous-access via LDAP"
+      community.general.ldap_attrs:
+        dn: "cn=config"
+        attributes:
+          nsslapd-allow-anonymous-access: "rootdse"
+        state: "exact"
+        bind_dn: "{{ ipa_keytab_dn_vault | default('cn=Directory Manager') }}"
+        bind_pw: "{{ ipa_dm_password_vault | default(ipaadmin_password |
+          default(ipadm_password | default(global_admin_password |
+          default('')))) }}"
+        server_uri: "ldaps://{{ ansible_fqdn }}"
+        validate_certs: false
+      notify: "Restart_ds"
+      no_log: true
+  rescue:
+    - name: "Warn and continue if anonymous-access hardening cannot be applied"
+      ansible.builtin.debug:
+        msg: "IdM hardening warning: unable to set nsslapd-allow-anonymous-access;
+          continuing build."
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_harden

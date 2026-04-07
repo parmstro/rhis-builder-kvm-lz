@@ -1,0 +1,33 @@
+---
+# Basic smartcard enablement task
+
+- name: "Enable smartcard authentication for the IdM Servers"
+  hosts: ipacluster
+  become: true
+
+  tasks:
+
+    - name: "Load the vault variables"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+
+    - name: "Load the other variables"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+
+    - name: "Import the Smartcard certificate profiles to IdM Servers"
+      connection: local
+      ansible.builtin.include_tasks: ensure_certificate_profile.yml
+      loop: "{{ idm_certificate_profiles }}"
+      loop_control:
+        loop_var: profile
+
+  roles:
+    - role: "ipasmartcard_server"
+      state: "present"  # noqa var-naming[no-role-prefix] because its not a role var
+      vars:
+        ipaadmin_username: "{{ ipa_principal_username_vault }}" # noqa var-naming[no-role-prefix] these are defined by the freeipa collection
+        ipaadmin_password: "{{ ipa_principal_password_vault }}" # noqa var-naming[no-role-prefix]
+        ipasmartcard_server_ca_certs: "/etc/ipa/ca.crt" # comma delimited list

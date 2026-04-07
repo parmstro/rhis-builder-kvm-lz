@@ -1,0 +1,15 @@
+---
+
+# add the disk based on the target
+
+- name: "Add VMware snapshot disk"
+  when: host_platform == "vmware"
+  ansible.builtin.include_tasks: "add_vmware_disk.yml"
+
+- name: "Add Azure snapshot disk"
+  when: host_platform == "azure"
+  ansible.builtin.include_tasks: "add_azure_disk.yml"
+
+- name: "Add AWS snapshot disk"
+  when: host_platform == "aws"
+  ansible.builtin.include_tasks: "add_aws_disk.yml"

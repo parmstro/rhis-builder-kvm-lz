@@ -1,0 +1,6 @@
+<network>
+  <name>{{ rhis_internal_network_name }}</name>
+  <bridge name='{{ rhis_internal_bridge }}' stp='on' delay='0'/>
+  <dns enable='no'/>
+  <ip address='{{ rhis_internal_gw }}' netmask='{{ rhis_internal_netmask }}'/>
+</network>

@@ -1,0 +1,87 @@
+---
+# tasks/configure_rhcloud_cleanup.yml — rhis_sat_config
+# Enable auto-deletion of mismatched host records from RH cloud settings.
+
+- name: "Resolve rhcloud mismatch auto-delete setting name"
+  when:
+    - rhis_sat_config_enable_rhcloud_mismatch_autodelete | bool
+    - rhis_sat_config_rhcloud_mismatch_setting_name | length == 0
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Fetch all Satellite settings for rhcloud discovery"
+      redhat.satellite.resource_info:
+        resource: settings
+      register: _rhcloud_settings
+      no_log: true
+      tags:
+        - tags_sat_config_rhcloud
+
+- name: "Select discovered rhcloud mismatch auto-delete setting"
+  when:
+    - rhis_sat_config_enable_rhcloud_mismatch_autodelete | bool
+    - rhis_sat_config_rhcloud_mismatch_setting_name | length == 0
+  ansible.builtin.set_fact:
+    _rhcloud_setting_name: >-
+      {{
+        (
+          _rhcloud_settings.resources
+          | selectattr('name', 'search', '(?i)cloud|rhcloud')
+          | selectattr('name', 'search', '(?i)mismatch|mismatched')
+          | selectattr('name', 'search', '(?i)delete|deletion')
+          | map(attribute='name')
+          | list
+          | first
+        )
+      }}
+  tags:
+    - tags_sat_config_rhcloud
+
+- name: "Fail if rhcloud mismatch auto-delete setting cannot be discovered"
+  when:
+    - rhis_sat_config_enable_rhcloud_mismatch_autodelete | bool
+    - rhis_sat_config_rhcloud_mismatch_setting_name | length == 0
+    - (_rhcloud_setting_name | default('') | trim) == ''
+  ansible.builtin.fail:
+    msg: >-
+      Could not discover a Satellite setting matching rhcloud mismatch
+      auto-delete. Set rhis_sat_config_rhcloud_mismatch_setting_name explicitly
+      to your exact setting key.
+  tags:
+    - tags_sat_config_rhcloud
+
+- name: "Set effective rhcloud mismatch setting name"
+  when:
+    - rhis_sat_config_enable_rhcloud_mismatch_autodelete | bool
+  ansible.builtin.set_fact:
+    _rhis_sat_config_rhcloud_setting_effective: >-
+      {{
+        (rhis_sat_config_rhcloud_mismatch_setting_name | trim)
+        if (rhis_sat_config_rhcloud_mismatch_setting_name | trim | length) > 0
+        else (_rhcloud_setting_name | default('') | trim)
+      }}
+  tags:
+    - tags_sat_config_rhcloud
+
+- name: "Enable auto deletion for mismatched RH cloud host records"
+  when:
+    - rhis_sat_config_enable_rhcloud_mismatch_autodelete | bool
+    - (_rhis_sat_config_rhcloud_setting_effective | default('') | trim) != ''
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Set rhcloud mismatch auto-delete setting"
+      redhat.satellite.setting:
+        name: "{{ _rhis_sat_config_rhcloud_setting_effective }}"
+        value: "true"
+      no_log: true
+      tags:
+        - tags_sat_config_rhcloud

@@ -1,0 +1,14 @@
+---
+# template out each element in additional_sources
+
+- name: "Template the toml configuration"
+  ansible.builtin.template:
+    src: "additional_sat_source.toml.j2"
+    dest: "{{ osbuild_toml_dir }}/{{ source.repo_id }}.toml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Update composer with new source"
+  ansible.builtin.command: "composer-cli sources add {{ osbuild_toml_dir }}/{{ source.repo_id }}.toml"
+  changed_when: true

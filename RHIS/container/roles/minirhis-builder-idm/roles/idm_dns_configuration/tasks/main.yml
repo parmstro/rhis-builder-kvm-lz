@@ -1,0 +1,57 @@
+---
+
+# Configure IPA DNS
+# This will handle
+#  - dns zones (zone and reverse zone) and entries
+#  - dns forward zone configuration
+#  - dns server configuration
+#  - dns global configuration
+
+- name: "Ensure DNS Zone configurations"
+  when: idm_dns_zones is defined and (idm_dns_zones | length) > 0
+  ansible.builtin.include_tasks: "ensure_dns_zone.yml"
+  loop: "{{ idm_dns_zones }}"
+  loop_control:
+    loop_var: idm_dns_zone
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_dns
+
+- name: "Ensure DNS Foreward Zone configurations"
+  when: idm_dns_forward_zones is defined and (idm_dns_forward_zones | length) > 0
+  ansible.builtin.include_tasks: "ensure_dns_forward_zone.yml"
+  loop: "{{ idm_dns_forward_zones }}"
+  loop_control:
+    loop_var: idm_dns_forward_zone
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_dns
+
+- name: "Ensure DNS Global Configuration"
+  when: idm_dns_global_configuration is defined and (idm_dns_global_configuration | length) > 0
+  ansible.builtin.include_tasks: "ensure_dns_global_configuration.yml"
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_dns
+
+- name: "Ensure DNS Records configuration"
+  when: idm_dns_records is defined and (idm_dns_records | length) > 0
+  ansible.builtin.include_tasks: "ensure_dns_record.yml"
+  loop: "{{ idm_dns_records }}"
+  loop_control:
+    loop_var: idm_dns_record
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_dns

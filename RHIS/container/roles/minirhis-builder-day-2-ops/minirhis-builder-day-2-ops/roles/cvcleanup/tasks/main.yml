@@ -1,0 +1,17 @@
+---
+
+# This play cleans up content views and leaves only a configured amount remaining
+- name: "Prune the composite content views"
+  ansible.builtin.include_tasks: "prune_cvs.yml"
+  loop: "{{ composite_content_views }}"
+  loop_control:
+    loop_var: cv
+
+# NOTE: Attempting to prune content views that are active in
+#       a composite content view will result in a failure.
+
+- name: "Prune the content views"
+  ansible.builtin.include_tasks: "prune_cvs.yml"
+  loop: "{{ content_views }}"
+  loop_control:
+    loop_var: cv

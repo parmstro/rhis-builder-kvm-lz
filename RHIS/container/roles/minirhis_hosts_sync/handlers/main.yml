@@ -1,0 +1,7 @@
+---
+# rhis_hosts_sync/handlers/main.yml
+
+- name: Verify hosts file integrity
+  ansible.builtin.command: python3 -c "import socket; socket.gethostbyname('localhost')"
+  changed_when: false
+  listen: Verify hosts file integrity

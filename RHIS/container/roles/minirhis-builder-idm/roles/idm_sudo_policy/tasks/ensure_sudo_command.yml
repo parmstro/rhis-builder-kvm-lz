@@ -1,0 +1,15 @@
+---
+
+# ensure the state of a sudo command.
+- name: "Ensure the state of a sudo command - {{ idm_sudo_command.name }}"
+  redhat.rhel_idm.ipasudocmd:
+    ipaadmin_principal: "{{ ipa_admin_principal }}"
+    ipaadmin_password: "{{ ipa_admin_password }}"
+    name: "{{ idm_sudo_command.name }}"
+    description: "{{ idm_sudo_command.description }}"
+    state: "{{ idm_sudo_command.state | default(omit) }}"
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_sudo_policy

@@ -1,0 +1,11 @@
+---
+# minirhis_host_setup/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly:
+#   ansible-playbook container/roles/minirhis_host_setup/run.yml
+- name: RHIS Installer Host Setup
+  hosts: installer
+  connection: local
+  gather_facts: true
+  become: false
+  roles:
+    - role: minirhis_host_setup

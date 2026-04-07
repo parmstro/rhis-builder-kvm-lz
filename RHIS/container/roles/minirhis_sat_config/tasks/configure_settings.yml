@@ -1,0 +1,20 @@
+---
+# tasks/configure_settings.yml — rhis_sat_config
+# Applies global Satellite settings (Insights upload, HTTP proxy, etc.)
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Configure Satellite setting"
+      redhat.satellite.setting:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      loop: "{{ rhis_sat_config_settings }}"
+      no_log: true
+      tags:
+        - tags_sat_config_settings

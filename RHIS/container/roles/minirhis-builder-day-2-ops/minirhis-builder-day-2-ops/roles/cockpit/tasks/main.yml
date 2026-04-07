@@ -1,0 +1,94 @@
+---
+# cockpit
+#   dependencies:
+#     cockpit-bridge
+#     cockpit-system
+#     cockpit-ws
+#     cockpit-packagekit
+#     subscription-manager-cockpit
+#
+#   optional:
+#     RHEL7 == none
+#     RHEL8:
+#       - cockpit-composer
+#       - cockpit-dashboard
+#       - cockpit-leapp
+#       - cockpit-machines
+#       - cockpit-podman
+#       - cockpit-pcp
+#       - cockpit-session-recording
+
+- name: "Initialize the package list"
+  ansible.builtin.set_fact:
+    cockpit_list: []
+
+- name: "Ensure the default package"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit'] }}"
+
+- name: "Ensure the cockpit-composer plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-composer'] }}"
+
+- name: "Ensure the cockpit-dashboard plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-dashboard'] }}"
+
+- name: "Ensure the cockpit-leapp plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-leapp'] }}"
+
+- name: "Ensure the cockpit-machines plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-machines'] }}"
+
+- name: "Ensure the cockpit-podman plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-podman'] }}"
+
+- name: "Ensure the cockpit-pcp plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-pcp'] }}"
+
+- name: "Ensure the cockpit-session-recording plugin, when specified"
+  when:
+    - cockpit_composer or cockpit_all
+    - ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.set_fact:
+    cockpit_list: "{{ cockpit_list + ['cockpit-dashboard'] }}"
+
+- name: "Ensure the web console packages are installed"
+  ansible.builtin.yum:
+    name: "{{ cockpit_list }}"
+    state: present
+
+- name: "Ensure that the firewall is open"
+  ansible.builtin.service:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: "Ensure that the firewall is open"
+  ansible.posix.firewalld:
+    immediate: true
+    permanent: true
+    service: cockpit
+    state: enabled

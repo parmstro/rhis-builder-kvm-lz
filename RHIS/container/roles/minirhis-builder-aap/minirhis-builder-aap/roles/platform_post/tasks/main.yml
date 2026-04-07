@@ -1,0 +1,58 @@
+---
+# Run the post build tasks
+# Run and launch from provisioner
+
+# Configure AAP Authentication
+- name: "Configure AAP Authentication"
+  ansible.builtin.include_tasks: "configure_aap_auth.yml"
+
+# Add the credentials
+- name: "Add AAP credential types"
+  ansible.builtin.include_tasks: "add_aap_credential_types.yml"
+
+# Add the credentials
+- name: "Add AAP credentials"
+  ansible.builtin.include_tasks: "add_aap_credentials.yml"
+
+## UPDATE Organization Galaxy Credentials ##
+
+- name: "Build Execution Environments"
+  ansible.builtin.include_tasks: "build_aap_ees.yml"
+
+- name: "Add Execution Environments to Controller"
+  ansible.builtin.include_tasks: "add_aap_ees.yml"
+
+- name: "Add Organizations to Controller"
+  ansible.builtin.include_tasks: "add_aap_organizations.yml"
+
+# Add the inventory
+- name: "Add AAP inventories"
+  ansible.builtin.include_tasks: "add_aap_inventories.yml"
+
+# Add the inventory sources
+- name: "Add AAP inventory sources"
+  ansible.builtin.include_tasks: "add_aap_inventory_sources.yml"
+
+# Add the static inventory hosts
+- name: "Add AAP inventory sources"
+  ansible.builtin.include_tasks: "add_aap_static_hosts.yml"
+
+# Add the static inventory groups
+- name: "Add AAP inventory sources"
+  ansible.builtin.include_tasks: "add_aap_static_groups.yml"
+
+# Add our demo projects
+- name: "Add AAP projects"
+  ansible.builtin.include_tasks: "add_aap_projects.yml"
+
+# Add the demo templates for callback and pipeline
+- name: "Add AAP templates"
+  ansible.builtin.include_tasks: "add_aap_templates_list.yml"
+
+# Add the pipeline workflow template
+- name: "Add AAP workflows"
+  ansible.builtin.include_tasks: "add_aap_workflow_templates.yml"
+
+# Run the pipeline
+# - name: "Run Test Jobs"
+#   ansible.builtin.include_tasks: "launch_test_jobs.yml"

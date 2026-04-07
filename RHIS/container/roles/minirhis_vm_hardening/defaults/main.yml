@@ -1,0 +1,11 @@
+---
+# Defaults for rhis_vm_hardening role
+
+# Path to rc.local file that bootstraps first-boot automation.
+# After install completes, this is set back to non-executable so it is
+# not re-run on subsequent boots.
+rhis_rc_local_path: /etc/rc.d/rc.local
+rhis_rc_local_mode: "0644"
+
+# Set to false to skip the rc.local hardening step
+rhis_revert_rc_local: true

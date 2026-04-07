@@ -1,0 +1,13 @@
+{%  if sysmessage_type == "default_compliance" -%}
+{{ sysmessage_default_compliance_message }}
+{% elif sysmessage_type == "cis2" -%}
+{{ sysmessage_default_cis2_message }}
+{% elif sysmessage_type == "extended_cis2" -%}
+{{ sysmessage_extended_cis2_message }}
+{% elif sysmessage_type == "disa_stig" -%}
+{{ sysmessage_default_disa_stig_message }}
+{% elif sysmessage_type == "custom" -%}
+{{ sysmessage_custom_message }}
+{% else -%}
+{{ sysmessage_default_base_message }}
+{% endif %}

@@ -1,0 +1,44 @@
+---
+# rhis_vm_lifecycle/tasks/power_on.yml
+# Ensures each RHIS VM is running and set to autostart.
+
+- name: Gather VM states
+  ansible.builtin.command: virsh domstate {{ item }}
+  loop: "{{ rhis_vms }}"
+  register: vm_states
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Set autostart on each defined VM
+  ansible.builtin.command: virsh autostart {{ item.item }}
+  loop: "{{ vm_states.results }}"
+  when: item.rc == 0
+  changed_when: false
+  become: true
+
+- name: Start VMs that are not running
+  ansible.builtin.command: virsh start {{ item.item }}
+  loop: "{{ vm_states.results }}"
+  when:
+    - item.rc == 0
+    - "'running' not in (item.stdout | default(''))"
+  register: vm_start
+  failed_when:
+    - vm_start.rc is defined
+    - vm_start.rc != 0
+    - "'already running' not in (vm_start.stderr | default(''))"
+  become: true
+
+- name: Verify VM states after power-on
+  ansible.builtin.command: virsh domstate {{ item }}
+  loop: "{{ rhis_vms }}"
+  register: vm_states_post
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Report VM states
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ item.stdout | trim }}"
+  loop: "{{ vm_states_post.results }}"

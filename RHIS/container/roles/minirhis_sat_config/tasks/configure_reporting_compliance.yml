@@ -1,0 +1,357 @@
+---
+# tasks/configure_reporting_compliance.yml — rhis_sat_config
+# Configure monthly OpenSCAP policy, scheduled compliance reporting,
+# and global reporting settings.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Configure reporting settings"
+      redhat.satellite.setting:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+      loop: "{{ rhis_sat_config_reporting_settings }}"
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Resolve organization id"
+      redhat.satellite.resource_info:
+        resource: organizations
+        search: "name = {{ satellite_organization }}"
+      register: _org_info
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Resolve location id"
+      redhat.satellite.resource_info:
+        resource: locations
+        search: "name = {{ satellite_location }}"
+      register: _loc_info
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Resolve hostgroup ids for compliance policy"
+      redhat.satellite.resource_info:
+        resource: hostgroups
+        search: "name = {{ item }}"
+      loop: "{{ rhis_sat_config_compliance_hostgroups }}"
+      register: _compliance_hg_info
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Build compliance hostgroup id list"
+      ansible.builtin.set_fact:
+        _compliance_hostgroup_ids: >-
+          {{
+            _compliance_hg_info.results
+            | map(attribute='resources')
+            | map('first')
+            | select('defined')
+            | map(attribute='id')
+            | list
+          }}
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Lookup existing compliance policy"
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/compliance/policies?search=name=\"{{
+          rhis_sat_config_compliance_policy_name }}\""
+        method: "GET"
+        user: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs }}"
+        status_code: 200
+      register: _policy_lookup
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Create compliance policy when missing"
+      when: (_policy_lookup.json.results | default([]) | length) == 0
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/compliance/policies"
+        method: "POST"
+        user: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs }}"
+        body_format: "json"
+        body:
+          compliance_policy:
+            name: "{{ rhis_sat_config_compliance_policy_name }}"
+            period: "{{ rhis_sat_config_compliance_period }}"
+            day_of_month: "{{ rhis_sat_config_compliance_day_of_month }}"
+            scap_content_id: "{{ rhis_sat_config_scap_content_id }}"
+            scap_content_profile_id: "{{ rhis_sat_config_scap_profile_id }}"
+            organization_ids:
+              - "{{ _org_info.resources[0].id }}"
+            location_ids:
+              - "{{ _loc_info.resources[0].id }}"
+            hostgroup_ids: "{{ _compliance_hostgroup_ids }}"
+        status_code:
+          - 200
+          - 201
+      register: _policy_create
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Update compliance policy when existing"
+      when: (_policy_lookup.json.results | default([]) | length) > 0
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/compliance/policies/{{
+          _policy_lookup.json.results[0].id }}"
+        method: "PUT"
+        user: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs }}"
+        body_format: "json"
+        body:
+          compliance_policy:
+            name: "{{ rhis_sat_config_compliance_policy_name }}"
+            period: "{{ rhis_sat_config_compliance_period }}"
+            day_of_month: "{{ rhis_sat_config_compliance_day_of_month }}"
+            scap_content_id: "{{ rhis_sat_config_scap_content_id }}"
+            scap_content_profile_id: "{{ rhis_sat_config_scap_profile_id }}"
+            organization_ids:
+              - "{{ _org_info.resources[0].id }}"
+            location_ids:
+              - "{{ _loc_info.resources[0].id }}"
+            hostgroup_ids: "{{ _compliance_hostgroup_ids }}"
+        status_code:
+          - 200
+          - 201
+      register: _policy_update
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Resolve compliance report template"
+      redhat.satellite.resource_info:
+        resource: report_templates
+        search: "name = {{ rhis_sat_config_report_template_name }}"
+      register: _report_template_info
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Set default report template for compliance status"
+      when: (_report_template_info.resources | default([]) | length) > 0
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/report_templates/{{
+          _report_template_info.resources[0].id }}"
+        method: "PUT"
+        user: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs }}"
+        body_format: "json"
+        body:
+          report_template:
+            default: true
+        status_code:
+          - 200
+          - 201
+      register: _report_template_default
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+    - name: "Ensure monthly compliance report schedule exists"
+      when: (_report_template_info.resources | default([]) | length) > 0
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/report_templates/{{
+          _report_template_info.resources[0].id }}/schedule_report"
+        method: "POST"
+        user: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs }}"
+        body_format: "json"
+        body:
+          report_template:
+            search: "{{ rhis_sat_config_report_search }}"
+            mail_to: "{{ rhis_sat_config_report_email }}"
+            cron_line: "{{ rhis_sat_config_report_cron }}"
+            organization_id: "{{ _org_info.resources[0].id }}"
+            location_id: "{{ _loc_info.resources[0].id }}"
+        status_code:
+          - 200
+          - 201
+          - 202
+          - 422
+      register: _report_schedule
+      changed_when: "_report_schedule.status in [200, 201, 202]"
+      failed_when: false
+      no_log: true
+      tags:
+        - tags_sat_config_reporting
+
+- name: "Build compliance hostgroup id list"
+  ansible.builtin.set_fact:
+    _compliance_hostgroup_ids: >-
+      {{
+        _compliance_hg_info.results
+        | map(attribute='resources')
+        | map('first')
+        | select('defined')
+        | map(attribute='id')
+        | list
+      }}
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Lookup existing compliance policy"
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/api/v2/compliance/policies?search=name=\"{{
+      rhis_sat_config_compliance_policy_name }}\""
+    method: "GET"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    status_code: 200
+  register: _policy_lookup
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Create compliance policy when missing"
+  when: (_policy_lookup.json.results | default([]) | length) == 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/api/v2/compliance/policies"
+    method: "POST"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body_format: "json"
+    body:
+      compliance_policy:
+        name: "{{ rhis_sat_config_compliance_policy_name }}"
+        period: "{{ rhis_sat_config_compliance_period }}"
+        day_of_month: "{{ rhis_sat_config_compliance_day_of_month }}"
+        scap_content_id: "{{ rhis_sat_config_scap_content_id }}"
+        scap_content_profile_id: "{{ rhis_sat_config_scap_profile_id }}"
+        organization_ids:
+          - "{{ _org_info.resources[0].id }}"
+        location_ids:
+          - "{{ _loc_info.resources[0].id }}"
+        hostgroup_ids: "{{ _compliance_hostgroup_ids }}"
+    status_code:
+      - 200
+      - 201
+  register: _policy_create
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Update compliance policy when existing"
+  when: (_policy_lookup.json.results | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/api/v2/compliance/policies/{{
+      _policy_lookup.json.results[0].id }}"
+    method: "PUT"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body_format: "json"
+    body:
+      compliance_policy:
+        name: "{{ rhis_sat_config_compliance_policy_name }}"
+        period: "{{ rhis_sat_config_compliance_period }}"
+        day_of_month: "{{ rhis_sat_config_compliance_day_of_month }}"
+        scap_content_id: "{{ rhis_sat_config_scap_content_id }}"
+        scap_content_profile_id: "{{ rhis_sat_config_scap_profile_id }}"
+        organization_ids:
+          - "{{ _org_info.resources[0].id }}"
+        location_ids:
+          - "{{ _loc_info.resources[0].id }}"
+        hostgroup_ids: "{{ _compliance_hostgroup_ids }}"
+    status_code:
+      - 200
+      - 201
+  register: _policy_update
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Resolve compliance report template"
+  redhat.satellite.resource_info:
+    username: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    server_url: "{{ satellite_url }}"
+    validate_certs: "{{ satellite_validate_certs }}"
+    resource: report_templates
+    search: "name = {{ rhis_sat_config_report_template_name }}"
+  register: _report_template_info
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Set default report template for compliance status"
+  when: (_report_template_info.resources | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/api/v2/report_templates/{{
+      _report_template_info.resources[0].id }}"
+    method: "PUT"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body_format: "json"
+    body:
+      report_template:
+        default: true
+    status_code:
+      - 200
+      - 201
+  register: _report_template_default
+  no_log: true
+  tags:
+    - tags_sat_config_reporting
+
+- name: "Ensure monthly compliance report schedule exists"
+  when: (_report_template_info.resources | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/api/v2/report_templates/{{
+      _report_template_info.resources[0].id }}/schedule_report"
+    method: "POST"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    validate_certs: "{{ satellite_validate_certs }}"
+    body_format: "json"
+    body:
+      report_template:
+        search: "{{ rhis_sat_config_report_search }}"
+        mail_to: "{{ rhis_sat_config_report_email }}"
+        cron_line: "{{ rhis_sat_config_report_cron }}"
+        organization_id: "{{ _org_info.resources[0].id }}"
+        location_id: "{{ _loc_info.resources[0].id }}"
+    status_code:
+      - 200
+      - 201
+      - 202
+      - 422
+  register: _report_schedule
+  changed_when: "_report_schedule.status in [200, 201, 202]"
+  failed_when: false
+  no_log: true
+  tags:
+    - tags_sat_config_reporting

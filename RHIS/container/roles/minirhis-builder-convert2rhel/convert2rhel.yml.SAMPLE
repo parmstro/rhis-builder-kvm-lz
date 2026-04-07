@@ -1,0 +1,76 @@
+---
+# There are 12 variables ending in _vault
+# You will need to create your own vault file to store these varaibles. replaceme_vars.yml would be an example...
+# include the vault file by referencing the extra vars variable 'vault_path' or by using the ansible commandline switch
+# See run_role.yml 
+
+# For a description of the vault variables and the variables below see the README.md file
+
+host_pre_convert_sat_org_id: "{{ sat_organization_id_vault }}"
+host_pre_convert_sat_activationkey: "{{ sat_activation_key_centos_vault }}"
+
+# These are required by the role - the ak and org_id should be the same, username and password blank for Satellite
+# infra.convert2rhel variables
+rhsm_org: "{{ sat_organization_id_vault }}"
+rhsm_activation_key: "{{ sat_activation_key_centos_vault }}"
+rhsm_username: ""
+rhsm_password: ""
+
+satellite_username: "{{ satellite_username_vault }}"
+satellite_password: "{{ satellite_password_vault }}"
+satellite_url: "{{ satellite_url_vault }}"
+satellite_organization: "{{ satellite_organization_vault }}"
+satellite_location: "{{ satellite_location_vault }}"
+satellite_operatingsystem: "CentOS 7.9"
+
+analysis_convert2rhel_preconv_opts: "--els"
+convert_convert2rhel_opts: "--els"
+convert_reboot_requested: true
+common_convert2rhel_repo_satellite: true
+validate_convert2rhel_target_release: "7.9"
+
+host_platform: "vmware"
+vmware_vcenter_hostname: "{{ vmware_vcenter_hostname_vault }}"
+vmware_vcenter_username: "{{ vmware_vcenter_username_vault }}"
+vmware_vcenter_password: "{{ vmware_vcenter_password_vault }}"
+vmware_datacenter_name: "example.ca"
+vmware_machine_name: "{{ ansible_fqdn }}"
+disk_search_pattern: "sd.*"
+
+snapshot_disk_size_gb: "100"
+snapshot_disk_provision_type: "thin"
+snapshot_disk_datastore: "VMDatastore"
+snapshot_disk_state: "present"
+snapshot_disk_controller: 0
+snapshot_disk_unit: 42
+snapshot_disk_scsi_type: "paravirtual"
+snapshot_disk_mode: "persistent"
+
+snapshot_create_set_name: "c2r"
+snapshot_revert_set_name: "{{ snapshot_create_set_name }}"
+snapshot_remove_set_name: "{{ snapshot_create_set_name }}"
+
+snapshot_create_snapshot_autoextend_threshold: 70
+snapshot_create_snapshot_autoextend_percent: 20
+snapshot_create_boot_backup: true
+# we don't want to snap log volumes or audit volumes
+# as they will have interesting data
+snapshot_create_volumes:
+  - vg: vg_root
+    lv: lv_root
+    size: 10G
+  - vg: vg_root
+    lv: lv_var
+    size: 10G
+  - vg: vg_root
+    lv: lv_home
+    size: 1G
+  - vg: vg_root
+    lv: lv_var_log
+    size: 1G
+  - vg: vg_root
+    lv: lv_var_audit
+    size: 1G
+  - vg: vg_root
+    lv: lv_var_tmp
+    size: 1G

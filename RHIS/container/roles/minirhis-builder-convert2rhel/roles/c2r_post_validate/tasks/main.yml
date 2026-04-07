@@ -1,0 +1,55 @@
+---
+
+- name: "Clear previously gathered facts"
+  ansible.builtin.meta: clear_facts
+
+- name: "Gather the current system facts"
+  ansible.builtin.setup:
+
+- name: "Log current facts"
+  ansible.builtin.debug:
+    var: ansible_facts.selinux
+
+- name: "Assert the system is running Red Hat Enterprise Linux"
+  ansible.builtin.assert:
+    that:
+      ansible_facts.distribution == "RedHat"
+    success_msg: "SUCCESS: System is running Red Hat Enterprise Linux"
+    fail_msg: "FAILED: System is not running Red Hat Enterprise Linux"
+
+- name: "Assert the system is running the target release"
+  ansible.builtin.assert:
+    that:
+      ansible_facts.distribution_version == "{{ validate_convert2rhel_target_release }}"
+    success_msg: "SUCCESS: System is running the target release {{ validate_convert2rhel_target_release }}"
+    fail_msg: "FAILED: the system is not running the target release. Release reported is {{ ansible_facts.distribution_version }}"
+
+- name: "Assert SELinix in enabled" # noqa ignore-errors   WE ARE ONLY WARNING
+  ansible.builtin.assert:
+    that:
+      ansible_facts.selinux.status == "enabled"
+    success_msg: "SUCCESS: SELinux is enabled"
+    fail_msg: "WARNING: SELinux is not enabled. It is strongly suggest that SELinux is enabled and in enforcing mode."
+  ignore_errors: true
+
+- name: "Assert SELinux is in enforcing mode" # noqa ignore-errors   WE ARE ONLY WARNING
+  ansible.builtin.assert:
+    that:
+      ansible_facts.selinux.mode == "enforcing"
+    success_msg: "SUCCESS: SELinux in enforcing mode"
+    fail_msg: "WARNING: SELinux is in {{ ansible_facts.selinux.mode }} mode. It is strongly suggest that SELinux is in enforcing mode."
+  ignore_errors: true
+
+- name: "Gather services facts"
+  ansible.builtin.service_facts:
+
+- name: "List failed services"
+  ansible.builtin.debug:
+    msg: "{{ failed_services | map(attribute='name') }}"
+  vars:
+    failed_services: "{{ ansible_facts['services'].values() | selectattr('status', 'equalto', 'failed') }}"
+
+- name: "Demonstrate Failure Path"
+  when: demonstrate_failure_path is defined and demonstrate_failure_path
+  ansible.builtin.fail:
+    msg: "Artificially generating failure to demostrate rollback"

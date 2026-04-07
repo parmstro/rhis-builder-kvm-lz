@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: rhis_libvirt_networks
+  author: RHIS Team
+  description: >
+    Creates and activates the RHIS 'external' (NAT/DHCP) and 'internal'
+    (static, no DHCP) libvirt networks required by the RHIS 3-node VM stack.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+dependencies: []

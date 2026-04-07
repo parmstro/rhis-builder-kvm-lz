@@ -1,0 +1,109 @@
+{
+    "changed": true,
+    "repo_view": {
+        "ansible-2.9-for-rhel-8-x86_64-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/layered/rhel8/x86_64/ansible/2.9/os",
+            "enabled": "1",
+            "enabled_metadata": "1",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Ansible Engine 2.9 for RHEL 8 x86_64 (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "codeready-builder-for-rhel-8-x86_64-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/rhel8/$releasever/x86_64/codeready-builder/os",
+            "enabled": "0",
+            "enabled_metadata": "0",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat CodeReady Linux Builder for RHEL 8 x86_64 (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "discovery-0-for-rhel-8-x86_64-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/layered/rhel8/x86_64/discovery/0/os",
+            "enabled": "0",
+            "enabled_metadata": "0",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Discovery 0 for RHEL 8 x86_64 (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "rhel-8-for-x86_64-appstream-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/rhel8/$releasever/x86_64/appstream/os",
+            "enabled": "1",
+            "enabled_metadata": "1",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Enterprise Linux 8 for x86_64 - AppStream (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "rhel-8-for-x86_64-baseos-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/rhel8/$releasever/x86_64/baseos/os",
+            "enabled": "1",
+            "enabled_metadata": "1",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Enterprise Linux 8 for x86_64 - BaseOS (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "rhel-8-for-x86_64-highavailability-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/rhel8/$releasever/x86_64/highavailability/os",
+            "enabled": "0",
+            "enabled_metadata": "0",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Enterprise Linux 8 for x86_64 - High Availability (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "rhel-8-for-x86_64-supplementary-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/rhel8/$releasever/x86_64/supplementary/os",
+            "enabled": "0",
+            "enabled_metadata": "0",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Enterprise Linux 8 for x86_64 - Supplementary (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        },
+        "satellite-tools-6.10-for-rhel-8-x86_64-rpms": {
+            "baseurl": "https://sat6.parmstrong.ca/pulp/repos/Default_Organization/Library/content/dist/layered/rhel8/x86_64/sat-tools/6.10/os",
+            "enabled": "1",
+            "enabled_metadata": "1",
+            "gpgcheck": "1",
+            "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release",
+            "metadata_expire": "1",
+            "name": "Red Hat Satellite Tools 6.10 for RHEL 8 x86_64 (RPMs)",
+            "sslcacert": "/etc/rhsm/ca/katello-server-ca.pem",
+            "sslclientcert": "/etc/pki/entitlement/7761031002674669954.pem",
+            "sslclientkey": "/etc/pki/entitlement/7761031002674669954-key.pem",
+            "sslverify": "1"
+        }
+    }
+}

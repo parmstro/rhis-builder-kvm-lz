@@ -1,0 +1,14 @@
+---
+# vmw_delete_snapshot.yml
+
+- name: Delete the snapshots for the list of hosts
+  hosts: all
+  vars_files:
+  - vars/vault.yml
+  - vars/main.yml
+  vars:
+    current_state: absent
+
+  tasks:
+  - include_tasks: tasks/snapshot_action.yml
+    loop: "{{ host_list }}"

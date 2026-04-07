@@ -1,0 +1,492 @@
+# MiniRHIS Script Run Checklist
+
+Use this checklist before running `MiniRHIS.sh`.
+
+The node where you run the script is the **installer host**.
+
+You can provide most items in one of three ways:
+
+- interactively when the script prompts
+- in `~/.ansible/conf/env.yml` (encrypted with `ansible-vault`)
+- in a bootstrap file passed with `--env-file /path/to/file`
+
+---
+
+## 1. Host machine prerequisites
+
+### Required
+
+- [ ] Linux host with `sudo` access
+- [ ] Hardware virtualization available (`KVM`/`libvirt`)
+- [ ] Enough CPU / RAM / disk for Satellite, AAP, and IdM VMs
+- [ ] Internet access from host to Red Hat services
+- [ ] Ability to install host packages as needed via `dnf` / `pip`
+  - Required platform set (current): `libvirt`, `virt-manager` and related tooling
+  - Common runtime tools: `virt-install`, `qemu-img`, `libvirt-client`, `qemu-kvm`, `genisoimage`/`xorriso`, `python3-pip`, `tmux`, `sshpass`
+
+### Notes
+
+- The script installs some prerequisites automatically, but the host still needs working package repositories and sudo privileges.
+- A GUI desktop session is helpful if you want the auto-opened console monitor windows. On headless systems the script falls back to `tmux`.
+
+---
+
+## 1.1 Installer-host Ansible collection prerequisites
+
+### Required behavior
+
+- [ ] Required Ansible collections are installed on the installer host.
+- [ ] Collection source order is:
+  1. `console.redhat.com` Automation Hub (published/validated)
+  2. `galaxy.ansible.com` fallback if collection is not available from Red Hat sources
+
+### Notes
+
+- The script now attempts this automatically using host-side `ansible-galaxy`.
+- Ensure your Hub token is valid when Red Hat collections are required.
+
+---
+
+## 2. Vault / secret storage prerequisites
+
+### Required
+
+- [ ] An Ansible Vault password for `~/.ansible/conf/.vaultpass.txt`
+- [ ] Encrypted `~/.ansible/conf/env.yml` exists and is decryptable with that password
+
+### Where it comes from
+
+- You create this locally the first time the script runs.
+- It is **not** downloaded from a URL.
+
+### Used for
+
+- Encrypting `~/.ansible/conf/env.yml`
+- Supplying runtime variables to config-as-code phases in the provisioner container
+
+### Non-interactive note
+
+- [ ] If using non-interactive mode, ensure vault password handling is ready (`~/.ansible/conf/.vaultpass.txt` and staged container-readable vault password flow)
+
+---
+
+## 3. Red Hat account / entitlement inputs
+
+### Required
+
+- [ ] `RH_USER` — Red Hat CDN username
+- [ ] `RH_PASS` — Red Hat CDN password
+- [ ] `RH_OFFLINE_TOKEN` — Red Hat offline token
+- [ ] `RH_ACCESS_TOKEN` — Red Hat access token
+
+### Where to obtain them
+
+- Red Hat Customer Portal / Hybrid Cloud Console:
+  - <https://access.redhat.com/>
+  - <https://console.redhat.com/>
+- Offline token / API access context:
+  - <https://console.redhat.com/openshift/token>
+- Token endpoint used by the script:
+  - `https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token`
+
+### Notes
+
+- The script can derive an access token from the offline token in some flows, but the current prompt flow expects both values to be available.
+- These credentials are used for registration, repo enablement, ISO access, and bundle download.
+- By default, guest kickstarts also attempt `rhc connect` (`RHC_AUTO_CONNECT=1`). Set `RHC_AUTO_CONNECT=0` to disable.
+
+### IdM 5.0 repository prerequisites
+
+- [ ] Entitlements/repositories for IdM 5.0 are available to target hosts:
+
+```bash
+subscription-manager repos --enable="rhel-10-for-x86_64-baseos-rpms" \
+--enable="rhel-10-for-x86_64-appstream-rpms" \
+--enable="idm-for-rhel-10-x86_64-rpms"
+```
+
+---
+
+## 4. Product download URLs / artifacts
+
+### Required
+
+- [ ] `RH_ISO_URL` — direct URL for the RHEL 10 installation ISO
+- [ ] `AAP_BUNDLE_URL` — direct URL for the AAP 2.6 containerized setup bundle `.tar.gz`
+
+### Where to obtain them
+
+| Artifact | Portal Download Page |
+| --- | --- |
+| **RHEL 10** boot/DVD ISO (`rhel-10.x-x86_64-*.iso`) | <https://access.redhat.com/downloads/content/479/ver=10> |
+| **RHEL 9** boot/DVD ISO (`rhel-9.x-x86_64-*.iso`) | <https://access.redhat.com/downloads/content/479/ver=9> |
+| **AAP 2.6** containerized setup bundle (`ansible-automation-platform-containerized-setup-bundle-2.6-*-x86_64.tar.gz`) | <https://access.redhat.com/downloads/content/480/ver=2.6> |
+
+> **Note:** The download portal generates temporary, authenticated CDN links. Copy the link from the portal at download time and paste it as your `RH_ISO_URL` / `AAP_BUNDLE_URL` value. These links expire and cannot be reused.
+
+### Notes
+
+- `RH_ISO_URL` should point to the RHEL 10 boot or DVD ISO (used for AAP and IdM VMs).
+- Satellite runs on RHEL 9 — if a separate Satellite ISO is required by your workflow, use a RHEL 9 link.
+- `AAP_BUNDLE_URL` should point to the **Ansible Automation Platform 2.6 containerized setup bundle** (`.tar.gz`). Choose the `x86_64` bundle.
+- These are temporary authenticated CDN links generated by the portal — copy them fresh each time.
+
+---
+
+## 4.1 Satellite CDN activation-key inputs
+
+### Satellite CDN activation-key inputs (strongly recommended)
+
+- [ ] `CDN_ORGANIZATION_ID` — RHSM/connector organization ID
+- [ ] `CDN_SAT_ACTIVATION_KEY` — activation key with Satellite entitlements
+
+### Notes
+
+- Satellite pre-flight remediation and `rhc connect` use these values when present.
+- Without them, registration falls back to username/password and may miss required Satellite entitlements.
+- Verify your key exposes at least:
+  - `satellite-6.18-for-rhel-9-x86_64-rpms`
+  - `satellite-maintenance-6.18-for-rhel-9-x86_64-rpms`
+- **After creating your activation key**, go to <https://access.redhat.com/management/subscription_allocations> and add Subscription Allocations to it — without allocations attached, the key cannot entitle the Satellite host to the required repos.
+
+---
+
+## 5. Automation Hub access
+
+### Required
+
+- [ ] `HUB_TOKEN` — Red Hat Automation Hub token
+
+### Where to obtain it
+
+| Step | Location |
+| --- | --- |
+| 1. Log in to Hybrid Cloud Console | <https://console.redhat.com/> |
+| 2. Navigate to **Automation Hub → Connect to Hub** | <https://console.redhat.com/ansible/automation-hub/token> |
+| 3. Click **Load token** and copy the value | Use the token as `HUB_TOKEN` |
+
+### Notes
+
+- The AAP kickstart uses this so the containerized installer can access Automation Hub content.
+- Tokens expire — if collection installs fail with auth errors, generate a fresh token at the link above.
+
+---
+
+## 6. Shared identity / naming inputs
+
+### Required
+
+- [ ] `ADMIN_USER` — shared admin username used across the lab
+- [ ] `ADMIN_PASS` — shared admin password used across the lab
+- [ ] `DOMAIN` — shared DNS domain (example: `example.com`)
+- [ ] `REALM` — Kerberos realm (usually uppercase domain, example: `EXAMPLE.COM`)
+
+### Where these come from
+
+- Chosen by you / your organization
+- No download URL
+
+### Notes
+
+- These values are reused across Satellite, AAP, and IdM.
+- The script now treats placeholders like `example.com` as unresolved and will prompt again.
+
+---
+
+## 7. Internal network plan
+
+### Required by prompt flow or strong recommended customization
+
+- [ ] `INTERNAL_NETWORK` — shared internal network CIDR base (example: `10.168.0.0`)
+- [ ] `NETMASK` — shared internal subnet mask
+- [ ] `INTERNAL_GW` — shared internal gateway
+- [ ] `SAT_IP` — Satellite internal IP
+- [ ] `AAP_IP` — AAP internal IP
+- [ ] `IDM_IP` — IdM internal IP
+- [ ] `SAT_HOSTNAME` — Satellite FQDN
+- [ ] `AAP_HOSTNAME` — AAP FQDN
+- [ ] `IDM_HOSTNAME` — IdM FQDN
+- [ ] `SAT_ALIAS` — Satellite short role alias (default `satellite`)
+- [ ] `AAP_ALIAS` — AAP short role alias (default `aap`)
+- [ ] `IDM_ALIAS` — IdM short role alias (default `idm`)
+
+### Default values currently assumed by the script
+
+- `INTERNAL_NETWORK=10.168.0.0`
+- `SAT_IP=10.168.128.1`
+- `AAP_IP=10.168.128.2`
+- `IDM_IP=10.168.128.3`
+- `NETMASK=255.255.0.0`
+- `INTERNAL_GW=10.168.0.1`
+- `SAT_ALIAS=satellite`
+- `AAP_ALIAS=aap`
+- `IDM_ALIAS=idm`
+
+Default hostname patterns (all can be changed during `--reconfigure` and are
+persisted in encrypted `~/.ansible/conf/env.yml`):
+
+- `SAT_HOSTNAME=satellite.<domain>`
+- `AAP_HOSTNAME=aap.<domain>`
+- `IDM_HOSTNAME=idm.<domain>`
+
+### Where these come from
+
+- Chosen by you / your lab network design
+- No download URL
+
+### Notes
+
+- The script expects:
+  - `external` network = outside connectivity / updates / remote access
+  - `internal` network = provisioning / orchestration / management
+- DNS fallback in automation paths is expected to include:
+  - `nameserver 10.168.0.1`
+  - `nameserver 1.1.1.1`
+  - `nameserver 8.8.8.8`
+  - `options rotate`
+- Make sure your chosen IPs and names match your intended DNS and routing plan.
+
+---
+
+## 8. Satellite-specific values
+
+### Required / prompted
+
+- [ ] `SAT_ORG` — Satellite Organization
+- [ ] `SAT_LOC` — Satellite Location
+
+### Default values in script
+
+- `SAT_ORG=REDHAT`
+- `SAT_LOC=CORE`
+
+### Where these come from
+
+- Chosen by you / your Satellite design
+- No download URL
+
+---
+
+## 8.1 Satellite manifest (optional but recommended for air-gapped or disconnected scenarios)
+
+### Optional for auto-import during provisioning
+
+- [ ] Satellite manifest ZIP file downloaded to `~/Downloads/manifest_*.zip`
+
+### Where to obtain it
+
+- Red Hat Customer Portal / Hybrid Cloud Console:
+  - <https://access.redhat.com/>
+  - Go to **Subscription Allocations** or navigate to your organization's manifests
+  - Download the manifest (typically named with pattern `manifest_Satellite_X.XX_*.zip`)
+  - Save to `~/Downloads/` on the installer host
+
+### How it works
+
+- The script auto-discovers the latest manifest file matching `manifest_*.zip` in `~/Downloads/`
+- If present, it stages the manifest for automatic import by the Satellite provisioning playbook
+- During Satellite configuration, the playbook will import the manifest using `hammer subscription upload`
+- If no manifest is found, the script continues — the Satellite instance will use portal-generated manifests instead
+
+### Fallback search locations
+
+- **Primary location:** `~/Downloads/manifest_*.zip`
+- **Fallback location:** `/var/lib/libvirt/images/manifest_*.zip` (checked if primary location is empty)
+- The script searches the primary location first, then falls back to the libvirt images directory if needed
+- This allows manifest staging from either user downloads or pre-staged libvirt directory
+
+### Notes
+
+- File pattern: `manifest_*.zip` (the script finds the latest by modification time)
+- Location: Must be in `~/Downloads/` directory on the installer host (or `/var/lib/libvirt/images/` for fallback staging)
+- Optional: Only required if you want to pre-stage a manifest for automatic import
+- The manifest import is skipped silently if no file is found — not an error condition
+- For air-gapped deployments, this is the recommended way to pre-load entitlements
+
+---
+---
+
+## 9. IdM-specific values
+
+### Required / prompted
+
+- [ ] `IDM_ADMIN_PASS` — IdM admin password
+- [ ] `IDM_DS_PASS` — IdM Directory Server password
+
+### Default behavior
+
+- `IDM_ADMIN_PASS` may inherit from the shared admin password if not customized
+- `IDM_DS_PASS` has a script default, but you should set it explicitly for real use
+
+### Where these come from
+
+- Chosen by you / your organization
+- No download URL
+
+---
+
+## 10. Host-side optional overrides
+
+### Optional
+
+- [ ] `ISO_DIR`
+- [ ] `ISO_NAME`
+- [ ] `ISO_PATH`
+- [ ] `VM_DIR`
+- [ ] `KS_DIR`
+- [ ] `OEMDRV_ISO`
+- [ ] `HOST_INT_IP`
+
+### Runtime UX tuning (optional)
+
+- [ ] `RHIS_POST_VM_SETTLE_GRACE` (default `650`)
+- [ ] `RHIS_INTERNAL_SSH_WARN_GRACE` (default `600`)
+- [ ] `RHIS_INTERNAL_SSH_LOG_EVERY` (default `60`)
+- [ ] `AAP_SSH_WAIT_TIMEOUT` (default `5400`)
+- [ ] `AAP_SSH_WAIT_INTERVAL` (default `10`)
+- [ ] `AAP_SSH_PROGRESS_EVERY` (default `30`)
+- [ ] `AAP_SSH_NO_PROGRESS_TIMEOUT` (default `900`)
+
+### Notes
+
+- Only needed if you do **not** want the script defaults.
+- `HOST_INT_IP` is important if the AAP bundle HTTP server should bind to a different host address than the default `192.168.122.1`.
+
+---
+
+## 10.2 Workspace layout expectation
+
+For a clean source directory model, the only non-hidden top-level source artifacts you should need to keep are:
+
+- `CHECKLIST.md`
+- `LICENSE`
+- `README.md`
+- `MiniRHIS.sh`
+
+Other runtime directories/files (for example `inventory/`, `host_vars/`, generated docs/runtime placeholders) are expected to be created by `MiniRHIS.sh` when missing.
+
+---
+
+## 10.1 SSH bootstrap / mesh prerequisites
+
+### Required for fully automated SSH trust setup
+
+- [ ] `ADMIN_USER` and `ADMIN_PASS` are valid on first boot for Satellite/AAP/IdM
+- [ ] `ROOT_PASS` (or fallback to `ADMIN_PASS`) is available
+- [ ] Host has `ssh`, `ssh-keygen`, `ssh-copy-id`
+- [ ] Host can install/use `sshpass`
+
+### What the script now expects to do
+
+- Generate SSH keypairs in kickstart for both `root` and admin/installer user
+- Establish self-trust intent for loopback (`root@127.0.0.1`, `admin@127.0.0.1`)
+- Push install-host `$USER` public key to both `root` and `admin` on Satellite, IdM, and AAP
+
+---
+
+## 11. Recommended minimum data set to gather before first run
+
+If you want the shortest practical checklist, gather these first:
+
+- [ ] Red Hat CDN username/password
+- [ ] Red Hat offline token
+- [ ] Red Hat access token
+- [ ] RHEL ISO URL
+- [ ] AAP bundle URL
+- [ ] CDN organization ID + Satellite activation key
+- [ ] Automation Hub token
+- [ ] Shared domain and realm
+- [ ] Shared admin username/password
+- [ ] Satellite / AAP / IdM internal IPs and hostnames
+- [ ] Satellite org and location
+- [ ] IdM DS password
+- [ ] AAP deployment model choice (enterprise multi-node `inventory.j2` or growth single-node `inventory-growth.j2`; DEMO is auto-selected with `--demo`)
+
+---
+
+## 12. Suggested run order
+
+1. Fill in the required values
+2. Run:
+
+- `./MiniRHIS.sh --reconfigure`
+- During `--reconfigure`, an interactive **inventory architecture submenu** will appear
+     to select the AAP installer deployment model (enterprise or growth; use `--demo` to skip)
+
+1. Verify values were written to:
+   - `~/.ansible/conf/env.yml`
+2. Clean old lab state if needed:
+
+- `./MiniRHIS.sh --DEMOKILL`
+
+1. Build the demo stack:
+
+- `./MiniRHIS.sh --DEMO`
+
+1. Optional read-only status snapshot (no provisioning changes):
+
+- `./MiniRHIS.sh --status`
+
+1. Optional: run a fast validation sweep after cleanup / before a full rebuild:
+
+- `./MiniRHIS.sh --test=fast --DEMO`
+
+1. Optional: run the broader integration-style test sweep:
+
+- `./MiniRHIS.sh --test=full --DEMO`
+
+---
+
+## 13. Quick source links
+
+- Red Hat Customer Portal: <https://access.redhat.com/>
+- Red Hat Downloads: <https://access.redhat.com/downloads/>
+- Red Hat Hybrid Cloud Console: <https://console.redhat.com/>
+- Activation keys: <https://console.redhat.com/insights/connector/activation-keys>
+- Subscription Allocations: <https://access.redhat.com/management/subscription_allocations>
+- Token / API access page: <https://console.redhat.com/openshift/token>
+- Red Hat SSO token endpoint used by script: <https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token>
+
+---
+
+## 14. Final sanity check before running
+
+- [ ] Domain and hostnames are **not** placeholders like `example.com`
+- [ ] URLs are current authenticated download URLs
+- [ ] Tokens are still valid
+- [ ] Host has enough free disk space for ISO + qcow2 images + AAP bundle
+- [ ] If using test mode, review `~/.ansible/conf/ansible-provisioner.log` after the run
+- [ ] KVM/libvirt is working (`virsh list --all` succeeds)
+- [ ] Your chosen internal IPs do not conflict with an existing network
+- [ ] CDN activation key + org ID are set if Satellite activation-key registration is expected
+- [ ] SSH bootstrap prerequisites are met (passwords + key tools available)
+- [ ] Any defaults you changed via prompts are visible in decrypted `~/.ansible/conf/env.yml`
+
+---
+
+## 15. Built-in script safeguards to expect in logs
+
+- [ ] Package pre-flight runs on managed nodes before phase playbooks:
+  - installs `rhel-system-roles`
+  - installs `rhc-worker-playbook` (pinned version first, then latest)
+  - retries package install with `--nogpgcheck` if initial install fails
+- [ ] Satellite RHSM remediation includes auth fallback and emits one-line cause classification:
+  - `remediation-ok`, `auth-failed`, `auth-failed-both`, `remediation-failed`
+- [ ] Satellite entitlement check validates enabled repos (not just full repo catalog output)
+
+### Manual rerun command (copy-safe JSON)
+
+If you run a playbook manually, keep JSON extra-vars quoted as one shell token:
+
+Before running `podman exec ... rhis-provisioner ...`, make sure the container exists/runs:
+
+```bash
+podman ps -a --format '{{.Names}} {{.Status}}' | grep -E '^rhis-provisioner\b' || echo 'Container missing: run menu option 2 first'
+podman start rhis-provisioner >/dev/null 2>&1 || true
+```
+
+```bash
+podman exec -it rhis-provisioner ansible-playbook --inventory /rhis/vars/external_inventory/hosts --vault-password-file /rhis/vars/vault/.vaultpass.container --extra-vars @/rhis/vars/vault/env.yml --extra-vars '{"satellite_disconnected":false,"register_to_satellite":false}' --limit idm /rhis/rhis-builder-idm/main.yml
+```
+
+If inventory/admin auth fails, use root-auth fallback with explicit auth vars.

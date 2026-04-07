@@ -1,0 +1,9 @@
+---
+# Defaults for parmstrong.ca
+
+time_timedaemon: "chrony"
+time_timeservers:
+  - "time.parmstrong.ca"
+  - "time2.parmstrong.ca"
+  - "time3.parmstrong.ca"
+time_timezone: "America/Toronto"

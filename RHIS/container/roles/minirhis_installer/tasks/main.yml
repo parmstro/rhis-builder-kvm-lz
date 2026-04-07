@@ -1,0 +1,47 @@
+---
+# Tasks for applying small repository-managed hotfixes into the running provisioner container
+
+- name: Run satellite_content_profile patch (idempotent)
+  ansible.builtin.shell: |
+    podman exec -i --env TARGET_PATH="{{ satellite_content_profile_path }}" --env DEMO_ADMIN_PASS="{{ demo_admin_password }}" {{ rhis_container_name }} python3 - <<'PY'
+    {% raw %}
+    import os, pathlib, sys
+    p=pathlib.Path(os.environ.get('TARGET_PATH'))
+    if not p.exists():
+      print('MISSING')
+      sys.exit(0)
+    text=p.read_text(encoding='utf-8',errors='ignore')
+    text=text.replace('satellite_organization: "{{ satellite_organization | default(\'REDHAT\') }}"','satellite_organization: "REDHAT"')
+    text=text.replace('satellite_organization: "{{ sat_org | default(\'REDHAT\') }}"','satellite_organization: "REDHAT"')
+    demo_pw = os.environ.get('DEMO_ADMIN_PASS','')
+    text=text.replace('satellite_password: "{{ sat_admin_pass | default(global_admin_password) | default(\'\') }}"',f'satellite_password: "{demo_pw}"')
+    text=text.replace('foreman_password: "{{ sat_admin_pass | default(global_admin_password) | default(\'\') }}"',f'foreman_password: "{demo_pw}"')
+    text=text.replace('hammer_password: "{{ sat_admin_pass | default(global_admin_password) | default(\'\') }}"',f'hammer_password: "{demo_pw}"')
+    p.write_text(text,encoding='utf-8')
+    print('PATCHED')
+    {% endraw %}
+    PY
+  register: sat_patch
+  changed_when: "'PATCHED' in sat_patch.stdout"
+
+
+- name: Run lifecycle_environments tasks patch (idempotent)
+  ansible.builtin.shell: |
+    podman exec -i --env TARGET_PATH="{{ lifecycle_tasks_path }}" {{ rhis_container_name }} python3 - <<'PY'
+    {% raw %}
+    import os, pathlib, sys
+    p=pathlib.Path(os.environ.get('TARGET_PATH'))
+    if not p.exists():
+      print('MISSING')
+      sys.exit(0)
+    text=p.read_text(encoding='utf-8',errors='ignore')
+    if 'no_log: true' in text:
+      text=text.replace('no_log: true','no_log: false')
+    if 'Debug: show lifecycle_environment item' not in text:
+      text=text.replace('ansible.builtin.include_tasks: "ensure_lifecycle_environment.yml"',"# debug-enabled include\n  - name: \"Debug: show lifecycle_environment item\"\n      ansible.builtin.debug:\n        var: lifecycle_environment\n      when: lifecycle_environment is defined\n\n    - ansible.builtin.include_tasks: \"ensure_lifecycle_environment.yml\"")
+    p.write_text(text,encoding='utf-8')
+    print('PATCHED')
+    {% endraw %}
+    PY
+  register: lifecycle_patch
+  changed_when: "'PATCHED' in lifecycle_patch.stdout"

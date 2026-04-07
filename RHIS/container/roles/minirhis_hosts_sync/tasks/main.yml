@@ -1,0 +1,42 @@
+---
+# rhis_hosts_sync/tasks/main.yml
+# Manages the RHIS-owned block in /etc/hosts on the installer (localhost).
+
+- name: "Validate: rhis_hosts_entries must be defined when adding block"
+  ansible.builtin.assert:
+    that:
+      - rhis_hosts_entries | length > 0
+    fail_msg: >
+      rhis_hosts_entries is empty — pass a list of {ip, fqdn, shortname} dicts.
+      Example:
+        rhis_hosts_entries:
+          - { ip: "10.168.0.1", fqdn: "satellite.example.com", shortname: "satellite" }
+  when: rhis_hosts_block_state == 'present'
+
+- name: Build RHIS /etc/hosts managed block
+  ansible.builtin.blockinfile:
+    path: "{{ rhis_hosts_file }}"
+    marker: "# {mark} {{ rhis_hosts_marker }}"
+    block: "{{ lookup('template', 'hosts_block.j2') }}"
+    state: "{{ rhis_hosts_block_state }}"
+    create: false
+    backup: true
+  become: true
+  notify: Verify hosts file integrity
+
+- name: Read back current /etc/hosts for idempotency check
+  ansible.builtin.command: grep -c "{{ rhis_hosts_marker }}" /etc/hosts
+  changed_when: false
+  failed_when: false
+  register: hosts_marker_count
+  when: rhis_hosts_block_state == 'present'
+
+- name: Warn if multiple RHIS blocks found (duplicate detection)
+  ansible.builtin.debug:
+    msg: >
+      WARNING: {{ hosts_marker_count.stdout }} occurrences of '{{ rhis_hosts_marker }}'
+      found in /etc/hosts — possible duplicate blocks. Review manually.
+  when:
+    - rhis_hosts_block_state == 'present'
+    - hosts_marker_count.stdout is defined
+    - (hosts_marker_count.stdout | int) > 2

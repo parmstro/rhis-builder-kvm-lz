@@ -1,0 +1,58 @@
+---
+# tasks/configure_custom_content.yml — rhis_sat_config
+# Creates sync plan, custom product, and custom repositories.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure sync plan: {{ rhis_sat_config_sync_plan_name }}"
+      redhat.satellite.sync_plan:
+        organization: "{{ satellite_organization }}"
+        name: "{{ rhis_sat_config_sync_plan_name }}"
+        interval: "{{ rhis_sat_config_sync_plan_interval }}"
+        enabled: true
+        sync_date: "{{ ansible_date_time.date }} {{ rhis_sat_config_sync_plan_time }}"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_content
+
+    - name: "Ensure custom product: {{ rhis_sat_config_custom_product }}"
+      redhat.satellite.product:
+        organization: "{{ satellite_organization }}"
+        name: "{{ rhis_sat_config_custom_product }}"
+        sync_plan: "{{ rhis_sat_config_sync_plan_name }}"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_content
+
+    - name: "Ensure Flathub OSTree repository"
+      redhat.satellite.repository:
+        organization: "{{ satellite_organization }}"
+        product: "{{ rhis_sat_config_custom_product }}"
+        name: "Flathub"
+        content_type: "ostree"
+        url: "https://dl.flathub.org/repo/"
+        download_policy: "on_demand"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_content
+
+    - name: "Ensure RHEL System Roles Ansible collection repository"
+      redhat.satellite.repository:
+        organization: "{{ satellite_organization }}"
+        product: "{{ rhis_sat_config_custom_product }}"
+        name: "RHEL_System_Roles"
+        content_type: "ansible_collection"
+        url: "https://console.redhat.com/api/automation-hub/"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_content

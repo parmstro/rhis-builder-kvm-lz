@@ -1,0 +1,10 @@
+---
+
+# Run the analyze task
+- name: "Running convert2rhel analyze with options:"
+  ansible.builtin.debug:
+    var: analysis_convert2rhel_preconv_opts
+
+- name: "Run convert2rhel analyze on host {{ ansible_fqdn }}"
+  ansible.builtin.include_role:
+    name: "infra.convert2rhel.analysis"

@@ -1,0 +1,40 @@
+---
+- name: "Ensure the secure directory exists"
+  ansible.builtin.file:
+    path: "{{ piv_tmp_secure_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "Read the yubikey info"
+  ansible.builtin.command: "ykman info"
+  register: yubi_info
+
+- name: "Register the device type"
+  ansible.builtin.set_fact:
+    piv_device_type: "{{ yubi_info.stdout_lines[0] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the device serial"
+  ansible.builtin.set_fact:
+    piv_device_serial: "{{ yubi_info.stdout_lines[1] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the device firmware version"
+  ansible.builtin.set_fact:
+    piv_device_fw_ver: "{{ yubi_info.stdout_lines[2] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the device firmware version"
+  ansible.builtin.set_fact:
+    piv_device_formfactor: "{{ yubi_info.stdout_lines[3] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the device usb interfaces"
+  ansible.builtin.set_fact:
+    piv_device_if_usb: "{{ yubi_info.stdout_lines[4] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the device NFC enabled"
+  ansible.builtin.set_fact:
+    piv_device_nfc_enabled: "{{ (yubi_info.stdout_lines[5] | regex_search('enabled'))  is truthy }}"
+
+- name: "Debug"
+  ansible.builtin.debug:
+    var: piv_device_type, piv_device_serial, piv_device_fw_ver, piv_device_formfactor, piv_device_if_usb, piv_device_nfc_enabled

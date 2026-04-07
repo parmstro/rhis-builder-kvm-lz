@@ -1,0 +1,42 @@
+---
+# This role is a simple example of jinja2 templating.
+# it is used to provide message of the day, issue and cockpit.issue
+# for ensuring various compliance mesages
+
+- name: "NOTE:"
+  ansible.builtin.debug:
+    msg: |
+      When logging in via ssh /etc/issue is not displayed
+      by default. /etc/motd is displayed after login.
+      To ensure proper compliance ensure sysmessage_motd
+      and sysmessage_issue contain required text.
+      If sysmessage_issue is empty, it will default to
+      sysmessage_motd text.
+
+- name: "Deploying sysmessage_type:"
+  ansible.builtin.debug:
+    var: sysmessage_type
+
+- name: "Deploy the template to motd"
+  ansible.builtin.template:
+    src: motd.j2
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Deploy the template to issue"
+  ansible.builtin.template:
+    src: motd.j2
+    dest: /etc/issue
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Deploy the template to cockpit issue"
+  ansible.builtin.template:
+    src: motd.j2
+    dest: /etc/issue.d/cockpit.issue
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: rhis_vm_lifecycle
+  author: RHIS Team
+  description: >
+    Manages RHIS VM lifecycle via virsh on the installer host:
+    power_on (ensure VMs are running + autostart),
+    reboot (ACPI reboot with hard-reset fallback),
+    set_passwords (root password via qemu-guest-agent).
+    Select action with rhis_vm_action variable.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+dependencies: []

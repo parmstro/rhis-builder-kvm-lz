@@ -1,0 +1,27 @@
+---
+# This task retrieves a list of items and the details for each item
+
+- name: "Perform resouce query against Satellite server"
+  block:
+
+    - name: "Fetch search results from Satellite"
+      redhat.satellite.resource_info:
+        username: "{{ gfl_satellite_username | default(omit) }}"
+        password: "{{ gfl_satellite_password | default(omit) }}"
+        use_gssapi: "{{ gfl_satellite_use_gssapi | default(omit) }}"
+        server_url: "{{ gfl_satellite_server_url }}"
+        organization: "{{ gfl_satellite_organization | default(omit) }}"
+        params: "{{ gfl_satellite_params | default(omit) }}"
+        resource: "{{ gfl_satellite_resource }}"
+        search: "{{ gfl_satellite_search_string }}"
+        full_details: true
+        validate_certs: "{{ gfl_satellite_validate_certs }}"
+      register: results
+
+    - name: "Parse the results"
+      ansible.builtin.set_fact:
+        gfl_list: "{{ results.resources | json_query('[*].name') }}"
+
+    - name: "Assign named result"
+      ansible.builtin.set_fact:
+        gfl_resources: "{{ results.resources }}"

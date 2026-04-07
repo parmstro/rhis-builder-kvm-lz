@@ -1,0 +1,52 @@
+RHIS DEMO Satellite Validation
+Date: 2026-04-01
+Command: bash MiniRHIS.sh --DEMO --satellite --validate
+
+Summary
+-------
+- Passed:   31 checks
+- Warnings: 2
+- Failed:   1
+
+Failure (critical)
+------------------
+- Red Hat CDN reachability
+  curl returned HTTP 404 when checking https://api.access.redhat.com/ping
+  Action: verify network/proxy settings and ensure access to Red Hat CDN.
+
+Warnings
+--------
+1) Environment file not found
+   - /home/sgallego/GIT/RHIS/.env was not present; the run relied on already-exported environment variables.
+   - Action: provide a preseed env file or export required vars before running.
+
+2) Satellite manifest not set
+   - `SAT_MANIFEST_PATH` is not configured. The process will attempt to fall back to ~/Downloads/manifest_*.zip for manifest import.
+   - Action: place the Satellite manifest at the configured path or set `SAT_MANIFEST_PATH`.
+
+Key checks (high level)
+-----------------------
+- System: Linux, sudo available — OK
+- Required commands: virsh, podman, ssh, ssh-keygen, jq, curl — OK
+- SSH keys: installer key pair present — OK
+- IP validation: SAT_IP, AAP_IP, IDM_IP, HOST_INT_IP — OK
+- Hostnames (FQDN): SAT_HOSTNAME, AAP_HOSTNAME, IDM_HOSTNAME — OK
+- Storage: /var/lib/libvirt free space — 695 GB (>= 300 GB) — OK
+- Memory: 125 GB (>= 64 GB recommended) — OK
+
+Next steps
+----------
+1. Fix the Red Hat CDN/network issue (proxy, firewall, or credentials) and re-run validation:
+
+   bash MiniRHIS.sh --DEMO --satellite --validate
+
+2. If you want to proceed after validation passes, run the full non-interactive DEMO Satellite flow (this will create VMs and perform post-boot configuration):
+
+   ./MiniRHIS.sh --DEMO --satellite
+
+3. Optional: prepare an env file and the Satellite manifest so the run is fully automated and reproducible.
+
+Notes
+-----
+- This validation run was non-destructive and intended to confirm readiness for the full provisioning flow.
+- If you want, I can re-run validation after you confirm network fixes or I can proceed with a full DEMO Satellite run (warn: it provisions VMs and performs configuration).

@@ -1,0 +1,11 @@
+---
+
+galaxy_info:
+  author: "RHIS"
+  description: >-
+    Configure AAP Controller with all rhis-builder projects, credentials,
+    inventory (from rhis-builder-inventory), job templates, and a global
+    environment survey workflow for standing up new RHIS environments.
+  standalone: false
+
+dependencies: []

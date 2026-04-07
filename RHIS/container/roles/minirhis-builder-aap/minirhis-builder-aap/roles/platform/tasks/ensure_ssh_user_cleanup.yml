@@ -1,0 +1,16 @@
+---
+
+- name: "Clean installer ssh keys"
+  when: cleanup_installer_keys
+  ansible.builtin.file:
+    path: "{{ current_file }}"
+    state: absent
+  loop:
+    - "/root/.ssh/id_rsa"
+    - "/root/.ssh/id_rsa.pub"
+    - "/root/.ssh/authorized_keys"
+    - "/home/{{ rhis_builder_default_user }}/.ssh/id_rsa"
+    - "/home/{{ rhis_builder_default_user }}/.ssh/id_rsa.pub"
+    - "/home/{{ rhis_builder_default_user }}/.ssh/authorized_keys"
+  loop_control:
+    loop_var: current_file

@@ -1,0 +1,107 @@
+---
+# Create a USER certificate
+
+# yamllint disable rule:line-length
+- name: "Set target service name"
+  ansible.builtin.set_fact:
+    target_service: "{{ crt_service_type }}/{{ ansible_fqdn }}"
+
+- name: Ensure target service is present
+  community.general.ipa_service:
+    name: "{{ target_service }}"
+    state: present
+    ipa_host: "{{ ipa_server_fqdn }}"
+    ipa_user: "{{ ipa_principal }}"
+    ipa_pass: "{{ ipa_password }}"
+
+- name: Create a secure directory
+  ansible.builtin.file:
+    path: "{{ crt_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check for an existing certificate file
+  ansible.builtin.stat:
+    path: "{{ ssl_crt_path }}"
+  register: cert_exists
+
+- name: "Set the HTTP service owner nickname"
+  when: service_owner_nickname is not defined
+  ansible.builtin.set_fact:
+    service_owner_nickname: "{{ ansible_fqdn }}"
+
+- name: "Cert exists and regen requested"
+  when: cert_exists.stat.exists and force_regen
+  block:
+
+    - name: "Cert exists, regenerating, read existing cert" # noqa: command-instead-of-module no-changed-when
+      ansible.builtin.shell: "sed -n 2,$(expr $(wc -l < {{ ssl_crt_path }}) - 1)p {{ ssl_crt_path }}"
+      register: cert
+
+    - name: "Cert exists, regenerating, get cert serial number" # noqa: command-instead-of-module no-changed-when risky-shell-pipe
+      ansible.builtin.shell: "ipa cert-find --services={{ target_service }} | grep 'Serial number:' | cut -c18-"
+      register: serial_num
+
+    - name: "Cert exists, regenerating - stop tracking" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "ipa-getcert stop-tracking -k {{ ssl_private_key_path }} -f {{ ssl_crt_path }} -i {{ service_owner_nickname }}"
+      ignore_errors: true
+
+    - name: "Cert exists, regenerating - remove the old cert from the service" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa service-remove-cert {{ target_service }} --certificate='{{ cert.stdout }}'"
+      ignore_errors: true
+#      no_log: true
+
+    - name: "Revocation"
+      block:
+        - name: "Cert exists, revoke the old cert with reason 6 - certificateHold - an admin can completely revoke it later" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+          ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa cert-revoke {{ serial_num.stdout }} --revocation-reason=6"
+          register: revocation
+          when: serial_num.stdout != ""
+ #         no_log: true
+
+      rescue:
+        - name: "If the return code is 127, the cert didn't exist"
+          ansible.builtin.debug:
+            msg: "The certificate did not exist - continuing"
+          when: revocation.rc == "127"
+
+    - name: "Cert exists, rename old cert .revoked"
+      ansible.builtin.copy:
+        src: "{{ ssl_crt_path }}"
+        dest: "{{ ssl_crt_path }}.revoked"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+
+
+- name: "Generating new certificate"
+  when: not cert_exists.stat.exists or force_regen
+  block:
+
+    - name: "Generate configuration files" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "echo {{ ssl_private_key_passphrase }} > {{ passfile }}"
+
+    - name: "Generating configuration files"  # noqa: command-instead-of-shell no-changed-when
+      ansible.builtin.command: "openssl genrsa -{{ ssl_private_key_cipher }} -out {{ ssl_private_key_pem_path }} -passout file:/{{ passfile }} {{ ssl_private_key_size }}"
+
+    - name: "Generating configuration files" # noqa: command-instead-of-shell no-changed-when
+      ansible.builtin.command: "openssl rsa -in {{ ssl_private_key_pem_path }} -out {{ ssl_private_key_path }} -passin file:/{{ passfile }}"
+
+    - name: "Create request" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.command: "openssl req -new -key {{ ssl_private_key_path }} -out {{ csr_path }} -subj \"/C={{ csr_country_name }}/ST={{ csr_state_or_province_name }}/L={{ csr_locality_name }}/O={{ csr_organization_name }}/OU={{ csr_organization_unit_name }}/CN={{ ansible_fqdn }}/subjectAltName=DNS.1={{ ansible_fqdn }}\""
+
+    - name: "Generate the certificate for the service" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa cert-request --add --principal='{{ target_service }}' {{ csr_path }} --certificate-out={{ ssl_crt_path }}"
+      no_log: true
+
+    - name: "Ensure that certmonger starts-tracking the new certificate for autorenewals" # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      ansible.builtin.shell: "echo '{{ ipa_password }}' | kinit {{ ipa_principal }};ipa-getcert start-tracking -k {{ ssl_private_key_path }} -f {{ ssl_crt_path }} -I {{ service_owner_nickname }}"
+      no_log: true
+
+    # This deprecated in the latest cockpit deployments
+    - name: "Create bundle of key and cert"  # noqa: command-instead-of-shell no-changed-when risky-shell-pipe ignore-errors
+      when: ansible_facts['distribution_major_version'] == "7"
+      ansible.builtin.shell: "cat {{ ssl_crt_path }} > {{ crt_key_bundle_path }}; cat {{ ssl_private_key_path }} >> {{ crt_key_bundle_path }};"

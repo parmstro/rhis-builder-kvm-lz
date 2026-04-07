@@ -1,0 +1,66 @@
+---
+# this is what the output looks like
+# we only care about the first three lines.
+
+# Repo ID:   satellite-client-6-for-rhel-9-x86_64-rpms
+# Repo Name: Red Hat Satellite Client 6 for RHEL 9 x86_64 (RPMs)
+# Repo URL:  https://sat6.parmstrong.ca/pulp/content/Default_Organization/SOE_Development/SOE_RHEL9/content/dist/layered/rhel9/x86_64/sat-client/6/os
+# Enabled:   1
+
+- name: "Intialize values"
+  when: ('+------' in line) or
+        ('Enabled' in line) or
+        ('baseos' in line) or
+        ('appstream' in line)
+  ansible.builtin.set_fact:
+    repo_id: ""
+    repo_name: ""
+    repo_url: ""
+
+- name: "Process the repo id line"
+  when: "'Repo ID' in line"
+  block:
+
+    - name: "Get the repoid" # noqa risky-shell-pipe
+      ansible.builtin.shell: echo "{{ line }}" | sed -e 's/Repo ID:\s*//'
+      changed_when: true
+      register: result
+
+    - name: "Get the repoid"
+      ansible.builtin.set_fact:
+        repo_id: "{{ result.stdout }}"
+
+
+- name: "Process the repo name"
+  when: "'Repo Name' in line"
+  block:
+
+    - name: "Get the repo name"  # noqa risky-shell-pipe
+      ansible.builtin.shell: echo "{{ line }}" | sed -e 's/Repo Name:\s*//'
+      changed_when: true
+      register: result
+
+    - name: "Set the repo_name"
+      ansible.builtin.set_fact:
+        repo_name: "{{ result.stdout }}"
+
+- name: "Process the repo URL" # noqa risky-shell-pipe
+  when: "'Repo URL' in line"
+  block:
+
+    - name: "Get the repo url"  # noqa risky-shell-pipe
+      ansible.builtin.shell: echo "{{ line }}" | sed -e 's/Repo URL:\s*//'
+      changed_when: true
+      register: result
+
+    - name: "Set the repo_url"
+      ansible.builtin.set_fact:
+        repo_url: "{{ result.stdout }}"
+
+- name: "Add the elements to the dictionary"
+  when:
+    - "repo_id != ''"
+    - "repo_name != ''"
+    - "repo_url != ''"
+  ansible.builtin.set_fact:
+    additional_sources: "{{ additional_sources | default('') | list + [{'repo_id': repo_id, 'repo_name': repo_name, 'repo_url': repo_url}] }}"

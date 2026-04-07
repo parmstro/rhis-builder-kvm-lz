@@ -1,0 +1,37 @@
+---
+# tasks/configure_operating_systems.yml — rhis_sat_config
+# Ensure RedHat 9/10 OS definitions and default kickstart/partition mappings.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure operating system definition exists for RedHat {{ item }}"
+      redhat.satellite.operatingsystem:
+        name: "RedHat"
+        major: "{{ item }}"
+        minor: "0"
+        family: "Redhat"
+        release_name: "BaseOS"
+        ptables:
+          - "{{ rhis_sat_config_partition_tables[0].name }}"
+        state: present
+      loop: "{{ rhis_sat_config_rhel_majors }}"
+      no_log: true
+      tags:
+        - tags_sat_config_os
+
+    - name: "Ensure default kickstart template is set for RedHat {{ item }}"
+      redhat.satellite.os_default_template:
+        operatingsystem: "RedHat {{ item }}"
+        template_kind: "provision"
+        provisioning_template: "Kickstart default"
+        state: present
+      loop: "{{ rhis_sat_config_rhel_majors }}"
+      no_log: true
+      tags:
+        - tags_sat_config_os

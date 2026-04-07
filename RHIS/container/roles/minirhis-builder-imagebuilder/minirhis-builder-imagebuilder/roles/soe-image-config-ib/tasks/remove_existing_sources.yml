@@ -1,0 +1,22 @@
+---
+
+# clean up the current configuration so only the specified repositories are available.
+# e.g.
+# jb-eap-7.4-for-rhel-9-x86_64-rpms
+# rhel-9-for-x86_64-supplementary-rpms
+# satellite-client-6-for-rhel-9-x86_64-rpms
+
+- name: "Get the list of sources"
+  ansible.builtin.command: "composer-cli sources list"
+  register: result
+  changed_when: true
+
+- name: "Remove the existing source"
+  ansible.builtin.command: "composer-cli sources delete {{ source }}"
+  when:
+    - source != "baseos"
+    - source != "appstream"
+  loop: "{{ result.stdout_lines | list }}"
+  changed_when: true
+  loop_control:
+    loop_var: source

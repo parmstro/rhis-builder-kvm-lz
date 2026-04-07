@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: rhis_ssh_mesh
+  author: RHIS Team
+  description: >
+    Bootstraps pairwise SSH trust across all RHIS nodes and the installer host.
+    Generates dedicated keypairs for the installer and each node's mesh user,
+    collects public keys, distributes them to authorized_keys on every host,
+    and deploys a permissive SSH client config on each node.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+dependencies: []

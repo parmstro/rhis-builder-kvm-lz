@@ -1,0 +1,35 @@
+---
+# enable_repo_set_item.yml
+- name: "Enable repository set item"
+  block:
+    - name: "Enable repository set via Satellite module"
+      redhat.satellite.repository_set:
+        username: "{{ satellite_username }}"
+        password: "{{ satellite_password }}"
+        server_url: "{{ satellite_url }}"
+        validate_certs: "{{ satellite_validate_certs }}"
+        organization: "{{ satellite_organization }}"
+        product: "{{ item.0.product }}"
+        name: "{{ item.0.name_template | replace('{{ rel }}', item.1) }}"
+        basearch: "x86_64"
+        releasever: "{{ item.1 if item.0.use_releasever else omit }}"
+        state: present
+  rescue:
+    - name: "Log repository set enable failure"
+      ansible.builtin.debug:
+        msg: "Failed to enable repository set for {{ item.0.product }} / {{ item.1 }}
+          via Satellite module."
+    - name: "Fallback: Enable repository set via hammer"
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir
+          }}/container/roles/rhis_tools/tasks/hammer_api_fallback.yml"
+      vars:
+        api_path: "repository_sets"
+        search_expr: >-
+          product="{{ item.0.product }}" name="{{ item.0.name_template |
+          replace("{{ rel }}", item.1) }}"
+        hammer_cmd: >-
+          hammer repository-set enable --organization "{{ satellite_organization
+          }}" --basearch "x86_64" {% if item.0.use_releasever %}--releasever "{{
+          item.1 }}" {% endif %} --product "{{ item.0.product }}" --name "{{
+          item.0.name_template | replace("{{ rel }}", item.1) }}"

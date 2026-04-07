@@ -1,0 +1,64 @@
+---
+# Set time date and time zone
+
+- name: "Gather service facts"
+  ansible.builtin.service_facts:
+
+- name: "Display services for debug"
+  when: debug_output
+  ansible.builtin.debug:
+    var: ansible_facts.services
+
+- name: "Ensure that ntp is stopped, disabled, and masked"
+  when: time_timedaemon == "chrony" and ansible_facts.services['ntpd.service'].status == 'enabled'
+  ansible.builtin.service:
+    name: ntpd
+    state: stopped
+    enabled: false
+
+- name: "Ensure chrony is installed"
+  ansible.builtin.package:
+    name: chrony
+    state: present
+
+- name: "Ensure the chrony config is current"
+  ansible.builtin.template:
+    src: chrony.j2
+    dest: /etc/chrony.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: "Ensure chrony is running with the new configuration"
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+    enabled: true
+    daemon_reload: true
+
+- name: "Force chrony to correct the clock"
+  ansible.builtin.command: "chronyc makestep"
+  changed_when: true
+
+- name: "Gather stats current stats"
+  ansible.builtin.command: "chronyc tracking"
+  changed_when: true
+  register: result
+
+- name: "Log the stats"
+  ansible.builtin.debug:
+    var: result
+
+- name: "Ensure the timezone is current"
+  community.general.timezone:
+    hwclock: "UTC"
+    name: "{{ time_timezone }}"
+
+- name: "Gather time zone stats"
+  ansible.builtin.command: "timedatectl"
+  changed_when: true
+  register: result
+
+- name: "Log the stats"
+  ansible.builtin.debug:
+    var: result

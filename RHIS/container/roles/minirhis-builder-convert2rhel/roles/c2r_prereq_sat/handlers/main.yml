@@ -1,0 +1,8 @@
+---
+
+# c2r_prerequisites handlers
+
+- name: "Reboot_host"
+  ansible.builtin.reboot:
+    post_reboot_delay: 60
+    reboot_timeout: 3600

@@ -1,0 +1,6 @@
+---
+# Run the convert task
+
+- name: "Run convert2rhel convert on host {{ ansible_fqdn }}"
+  ansible.builtin.include_role:
+    name: "infra.convert2rhel.convert"

@@ -1,0 +1,9 @@
+---
+
+- name: "Ensure Satellite deployed CentOS server prerequisites are met"
+  when: ansible_facts['distribution'] == "CentOS"
+  ansible.builtin.include_tasks: "ensure_centos_prereqs.yml"
+
+- name: "Ensure Satellite deployed OEL server prerequisites are met"
+  when: ansible_facts['distribution'] == "OracleLinux"
+  ansible.builtin.include_tasks: "ensure_oraclelinux_prereqs.yml"

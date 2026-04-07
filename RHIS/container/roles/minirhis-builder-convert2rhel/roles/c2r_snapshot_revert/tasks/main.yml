@@ -1,0 +1,27 @@
+---
+
+# Run the snapshot task
+
+- name: "Create the lvm_snapshot on host {{ ansible_fqdn }}"
+  ansible.builtin.include_role:
+    name: "infra.lvm_snapshots.snapshot_revert"
+
+# need to cleanup registration as Satellite operating system for host is now configured as RHEL
+# the system will fail to register as the OEL/CentOS/etc.. Media does not belong to the RHEL operating system
+- name: "Reset the operating system of the host in Satellite"
+  connection: local
+  redhat.satellite.host:
+    username: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    server_url: "{{ satellite_url }}"
+    name: "{{ ansible_fqdn }}"
+    operatingsystem: "{{ satellite_operatingsystem }}"
+    validate_certs: true
+
+
+- name: "Force reregistration of the host with the new activation_key"
+  community.general.redhat_subscription:
+    activationkey: "{{ host_pre_convert_sat_activationkey }}"
+    org_id: "{{ host_pre_convert_sat_org_id }}"
+    force_register: true
+    state: present

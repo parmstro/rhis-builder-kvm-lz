@@ -1,0 +1,18 @@
+---
+# Reusable include to run the tools/hammer_api_fallback.sh wrapper from Ansible.
+# Expects the following vars to be provided by the caller:
+# - api_path: API resource path (e.g. products, content_exports)
+# - search_expr: search expression to pass to the API (string)
+# - hammer_cmd: full hammer command line to run as a single string (without the leading 'bash ...')
+
+- name: "Run hammer API-first wrapper"
+  ansible.builtin.command: >-
+    bash {{ playbook_dir }}/tools/hammer_api_fallback.sh {{ api_path }} '{{ search_expr }}' -- {{ hammer_cmd }}
+  register: fallback_result
+  failed_when: false
+  changed_when: "'already exist' not in (fallback_result.stdout | default('') | lower)"
+
+- name: "Expose fallback result as fact"
+  ansible.builtin.set_fact:
+    fallback_result: "{{ fallback_result }}"
+  changed_when: false

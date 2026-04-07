@@ -1,0 +1,41 @@
+---
+
+# If you have more than one volume group that
+# you need to snapshot, you should examine the volume groups
+# at runtime and then add 1 disk per vg and snapshot them
+# this is rare as for convert2rhel we only want to snapshot
+# the OS disks, because thats all that is changing
+# If you need to make application level changes - again rare
+# application level volumes should als be snapshot... extend this model
+# Prepare for snapshot disk to virtual host
+
+- name: "Get the list of unique vgs that we need to add snapshot disks to"
+  ansible.builtin.set_fact:
+    snapshot_vgs: "{{ snapshot_create_volumes | selectattr('vg', 'defined') | map(attribute='vg') | unique | list }}"
+
+- name: "Log the list of vgs to add disks to"
+  ansible.builtin.debug:
+    msg: "snapshot_vgs: {{ snapshot_vgs }}"
+
+- name: "Discover the existing disks on the system"
+  ansible.builtin.include_tasks: "discover_disks.yml"
+  loop: "{{ snapshot_vgs }}"
+  loop_control:
+    loop_var: snapshot_vg
+
+# For centos systems using EFI boot, the contents are stored in
+# /boot/efi/EFI/centos the standard for RHEL machines is /boot/efi/EFI/redhat
+# on recovery we want to ensure that there is a copy is in /boot/efi/EFI/redhat
+# this will ensure snapshot revert works and when we reset the boot config,
+# the system will boot using the proper initramfs
+# this issue does not affect OEL or other distributions (to my knowledge)
+
+- name: "Copy /boot/efi/EFI/centos to /boot/efi/EFI/redhat for rollback"
+  when: ansible_facts['distribution'] == "CentOS"
+  ansible.builtin.copy:
+    src: "/boot/efi/EFI/centos/"
+    dest: "/boot/efi/EFI/redhat/"
+    remote_src: true
+    mode: "0700"
+    owner: "root"
+    group: "root"

@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rhis_vm_hardening
+  author: RHIS Team
+  description: >
+    Post-install hardening for RHIS VMs: reverts /etc/rc.d/rc.local to
+    non-executable so it does not re-run on next boot, disables kdump,
+    ensures SELinux enforcing and firewalld is active.
+  license: Apache-2.0
+  min_ansible_version: "2.14"
+  platforms:
+    - name: EL
+      versions:
+        - "9"
+        - "10"
+dependencies: []

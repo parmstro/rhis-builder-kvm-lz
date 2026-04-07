@@ -1,0 +1,57 @@
+---
+# rhis_vm_hardening/tasks/main.yml
+# Post-install hardening applied to all RHIS VMs remotely via Ansible.
+
+- name: Revert rc.local to non-executable (prevent re-run on next boot)
+  ansible.builtin.file:
+    path: "{{ rhis_rc_local_path }}"
+    mode: "{{ rhis_rc_local_mode }}"
+  when:
+    - rhis_revert_rc_local | bool
+    - ansible_facts['os_family'] == 'RedHat'
+  become: true
+
+- name: Ensure /etc/rc.d/rc.local exists (create placeholder if missing)
+  ansible.builtin.file:
+    path: "{{ rhis_rc_local_path }}"
+    state: touch
+    mode: "{{ rhis_rc_local_mode }}"
+    modification_time: preserve
+    access_time: preserve
+  when: rhis_revert_rc_local | bool
+  become: true
+
+- name: Disable unnecessary services (best-effort)
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - kdump
+  failed_when: false
+  become: true
+
+- name: Ensure SELinux is in enforcing mode
+  ansible.posix.selinux:
+    policy: targeted
+    state: enforcing
+  become: true
+  when: ansible_facts.get('selinux', {}).get('status') == 'enabled'
+  ignore_errors: true
+
+- name: Ensure firewalld is active on RHIS VMs
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  become: true
+  ignore_errors: true
+
+- name: Allow SSH through firewalld on RHIS VMs
+  ansible.posix.firewalld:
+    service: ssh
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  ignore_errors: true

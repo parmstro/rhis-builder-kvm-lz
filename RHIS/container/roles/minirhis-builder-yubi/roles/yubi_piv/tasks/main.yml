@@ -1,0 +1,31 @@
+---
+- name: "Gather the yubikey core facts"
+  ansible.builtin.include_tasks: "piv_gather_yubikey_facts.yml"
+
+- name: "Generate a new piv management key, pin and puk"
+  ansible.builtin.include_tasks: "piv_key_pin_puk.yml"
+
+- name: "Generate Cardholder info"
+  ansible.builtin.include_tasks: "piv_generate_ch_cfg.yml"
+
+- name: "Generate Private Data"
+  ansible.builtin.include_tasks: "piv_generate_priv_data.yml"
+
+- name: "Generate IdM Certificate"
+  ansible.builtin.include_tasks: "piv_generate_certs.yml"
+
+- name: "Import Certificate to key"
+  ansible.builtin.include_tasks: "piv_import_certs_to_yubikey.yml"
+
+- name: "Enable user authtype: PKINIT"
+  ansible.builtin.include_tasks: "piv_enable_user_authtype_pkinit.yml"
+
+- name: "Validate Yubikey PIV configuration"
+  ansible.builtin.include_tasks: "piv_validate_yubikey_config.yml"
+
+- name: "Gather the new PIV application facts"
+  ansible.builtin.include_tasks: "piv_gather_pivapp_facts.yml"
+
+- name: "Store new user data"
+  ansible.builtin.include_tasks: "piv_store_new user_data.yml"
+

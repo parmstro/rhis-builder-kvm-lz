@@ -1,0 +1,15 @@
+---
+# Defaults for rhis_ssh_mesh role
+
+# The user that Ansible (and the installer host) will use for management SSH.
+rhis_mesh_user: admin
+
+# Private key used by the RHIS installer for all managed-SSH operations.
+rhis_installer_key_path: "{{ ansible_env.HOME }}/.ssh/rhis-installer/id_rsa"
+
+# SSH client config to deploy on every RHIS node so they can reach each other.
+rhis_ssh_strict_checking: "no"
+
+# Collect and distribute root public keys in addition to mesh_user keys.
+# Useful for Ansible become and emergency recovery.
+rhis_include_root_keys: false

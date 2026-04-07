@@ -1,0 +1,344 @@
+---
+# Set up the prerequisites, install idm, configure idm
+# our idm role encapsulates ipaserver and post configuration
+- name: "Build the idm primary"
+  hosts: idm_primary
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: "Load the vault variables"
+      when: vault_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vault_path }}"
+      tags:
+        - always
+
+    - name: "Load the other variables"
+      when: vars_path is defined
+      ansible.builtin.include_vars:
+        file: "{{ vars_path }}"
+      tags:
+        - always
+
+    - name: "Load the vault variables"
+      when: vault_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vault_dir }}"
+      tags:
+        - always
+
+    - name: "Load the other variables"
+      when: vars_dir is defined
+      ansible.builtin.include_vars:
+        dir: "{{ vars_dir }}"
+      tags:
+        - always
+
+    - name: "Normalize IdM defaults for pre/install roles"
+      ansible.builtin.set_fact:
+        idm_repository_ids: "{{ idm_repository_ids |
+          default(['rhel-10-for-x86_64-baseos-rpms',
+          'rhel-10-for-x86_64-appstream-rpms']) }}"
+        async_timeout: "{{ async_timeout | default(14400) }}"
+        async_delay: "{{ async_delay | default(15) }}"
+        register_to_satellite: "{{ register_to_satellite | default(false) | bool }}"
+        # Keep IdM RHSM registration independent from Satellite org/AK defaults.
+        # Use explicit IdM/RHC overrides when provided; otherwise fall back to
+        # username/password registration in idm_pre.
+        cdn_organization_vault: "{{ cdn_organization_vault |
+          default(idm_cdn_organization_id | default(rhc_organization_id |
+          default(''))) }}"
+        cdn_activation_key_vault: "{{ cdn_activation_key_vault |
+          default(idm_cdn_activation_key | default(rhc_activation_key |
+          default(''))) }}"
+        rhc_insights_state: "{{ rhc_insights_state | default('absent') }}"
+        rhc_enable_auto_update: "{{ rhc_enable_auto_update | default(false) | bool }}"
+        ipa_admin_principal: "{{ ipa_admin_principal | default(ipaadmin_principal |
+          default('admin')) }}"
+        ipa_admin_password: "{{ ipa_admin_password | default(ipaadmin_password |
+          default(ipadm_password | default(idm_admin_pass |
+          default(global_admin_password | default(admin_pass | default(''))))))
+          }}"
+        ipa_keytab_dn_vault: "{{ ipa_keytab_dn_vault | default('cn=Directory Manager') }}"
+        ipa_dm_password_vault: "{{ ipa_dm_password_vault | default(idm_ds_pass |
+          default(idm_ds_password | default(''))) }}"
+        ipa_required_umask: "{{ ipa_required_umask | default('0022') }}"
+        ipa_firewalld_zone: "{{ ipa_firewalld_zone | default('public') }}"
+        ipa_prime_interface: "{{ ipa_prime_interface |
+          default(ansible_default_ipv4.interface | default('eth0')) }}"
+        ipa_firewalld_services: "{{ ipa_firewalld_services | default(['freeipa-ldap',
+          'freeipa-ldaps', 'dns', 'http', 'https', 'kerberos', 'kpasswd',
+          'ntp']) }}"
+        ipaserver_domain: "{{ ipaserver_domain | default(idm_domain | default(domain |
+          default(''))) }}"
+        ipaserver_realm: "{{ ipaserver_realm | default(idm_realm | default(realm |
+          default('') | upper)) }}"
+      changed_when: false
+      tags:
+        - always
+
+    - name: "Apply role idm_pre"
+      ansible.builtin.include_role:
+        name: idm_pre
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_pre
+            - tags_idm_install
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_pre
+        - tags_idm_install
+
+    - name: "Apply role idm_primary"
+      ansible.builtin.include_role:
+        name: idm_primary
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_install
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_install
+
+    - name: "Apply role idm_harden"
+      ansible.builtin.include_role:
+        name: idm_harden
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_harden
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_harden
+
+    # set the base configurations for the deployment
+    - name: "Apply role idm_configuration"
+      ansible.builtin.include_role:
+        name: idm_configuration
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_config
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_config
+
+    # ensure your id ranges before you create users
+    - name: "Apply role idm_id_ranges"
+      ansible.builtin.include_role:
+        name: idm_id_ranges
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_id_ranges
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_id_ranges
+
+    # idp references must exist before you can
+    # apply to a user authentication scheme
+    - name: "Apply role idm_idp_reference"
+      ansible.builtin.include_role:
+        name: idm_idp_references
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_idp_config
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_idp_config
+
+    - name: "Apply automount policy"
+      ansible.builtin.include_role:
+        name: idm_automounts
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_automounts
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_automounts
+
+    - name: "Apply certificate profiles"
+      ansible.builtin.include_role:
+        name: idm_certificate_profiles
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_certificate_profiles
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_certificate_profiles
+
+    - name: "Apply role idm_users"
+      ansible.builtin.include_role:
+        name: idm_users
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_users
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_users
+
+    - name: "Apply role idm_user_groups"
+      ansible.builtin.include_role:
+        name: idm_user_groups
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_user_groups
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_user_groups
+
+    # password policy is applied to groups
+    # group needs to exist of will policy creation/mod will fail
+    - name: "Apply role idm_password_policy"
+      ansible.builtin.include_role:
+        name: idm_password_policy
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_password_policy
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_password_policy
+
+    - name: "Apply role idm_host_groups"
+      ansible.builtin.include_role:
+        name: idm_host_groups
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_host_groups
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_host_groups
+
+    # Add the hosts do not support ipa_client
+    # Add hosts that *do* support ipa_client
+    - name: "Apply role idm_hosts"
+      ansible.builtin.include_role:
+        name: idm_hosts
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_hosts
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_hosts
+
+    - name: "Apply role idm_hbac policy"
+      ansible.builtin.include_role:
+        name: idm_hbac_policy
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_hbac_policy
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_hbac_policy
+
+    - name: "Apply role idm_sudo policy"
+      ansible.builtin.include_role:
+        name: idm_sudo_policy
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_sudo_policy
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_sudo_policy
+
+    - name: "Apply role idm_dns configuration"
+      ansible.builtin.include_role:
+        name: idm_dns_configuration
+        apply:
+          tags:
+            - tags_rhis_builder
+            - tags_rhis_builder_idm
+            - tags_idm_post_install
+            - tags_idm_dns
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+        - tags_idm_dns
+
+    - name: "Check whether rc.local exists"
+      ansible.builtin.stat:
+        path: "/etc/rc.d/rc.local"
+      register: _rhis_idm_rc_local
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install
+
+    - name: "Ensure rc.local is non-executable"
+      when: _rhis_idm_rc_local.stat.exists | default(false)
+      ansible.builtin.file:
+        path: "/etc/rc.d/rc.local"
+        mode: "0644"
+      tags:
+        - tags_rhis_builder
+        - tags_rhis_builder_idm
+        - tags_idm_post_install

@@ -1,0 +1,31 @@
+---
+
+# redhat.rhel_system_roles for setting a simple set of firewall rules is so overkill!
+
+- name: "Configure the firewalld for IdM"
+  ansible.builtin.include_role:
+    name: "redhat.rhel_system_roles.firewall"
+  vars:
+    firewall:
+      # noqa: var-naming[no-role-prefix]
+      - {
+          set_default_zone: "{{ ipa_firewalld_zone | default('public') }}",
+          state: enabled,
+        }
+      - {
+          interface: "{{ ipa_prime_interface | default(ansible_default_ipv4.interface |
+            default('eth1')) }}",
+          zone: "{{ ipa_firewalld_zone | default('public') }}",
+          state: enabled,
+        }
+      - {
+          service: "{{ ipa_firewalld_services | default(['freeipa-ldap', 'freeipa-ldaps',
+            'dns', 'http', 'https', 'kerberos', 'kpasswd', 'ntp']) }}",
+          permanent: true,
+          state: enabled,
+        }
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_pre
+    - tags_idm_install

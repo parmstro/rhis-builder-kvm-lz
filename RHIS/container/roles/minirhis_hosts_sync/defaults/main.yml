@@ -1,0 +1,20 @@
+---
+# Defaults for rhis_hosts_sync role
+
+# Managed block marker text inside /etc/hosts.
+# blockinfile will surround the block with:
+#   # BEGIN RHIS INTERNAL HOSTS
+#   ...
+#   # END RHIS INTERNAL HOSTS
+rhis_hosts_marker: "RHIS INTERNAL HOSTS"
+
+# Path to /etc/hosts on the target.
+rhis_hosts_file: /etc/hosts
+
+# List of entries to write into the RHIS managed block.
+# Each item: { ip: "10.168.0.1", fqdn: "satellite.example.com", shortname: "satellite" }
+# Override via --extra-vars or set in host_vars.
+rhis_hosts_entries: []
+
+# Set to absent to remove the block.
+rhis_hosts_block_state: present

@@ -1,0 +1,17 @@
+---
+# Defaults for rhis_libvirt_networks role
+
+# External (NAT) network — provides internet access for guest eth0
+rhis_external_network_name: external
+rhis_external_bridge: virbr-external
+rhis_external_mode: nat
+rhis_external_ip: 192.168.122.1
+rhis_external_netmask: 255.255.255.0
+rhis_external_dhcp_start: 192.168.122.2
+rhis_external_dhcp_end: 192.168.122.254
+
+# Internal (static, no DHCP) network — used for all managed RHIS SSH traffic
+rhis_internal_network_name: internal
+rhis_internal_bridge: virbr-internal
+rhis_internal_gw: "{{ internal_gw | default('10.168.0.1') }}"
+rhis_internal_netmask: "{{ netmask | default('255.255.0.0') }}"

@@ -1,0 +1,29 @@
+---
+# RHEL8 modules == use group
+# Install base components
+
+- name: "Clean dnf metadata"
+  ansible.builtin.command: "dnf clean all"
+  register: dnf_clean_result
+  changed_when: dnf_clean_result.rc == 0
+
+- name: "Ensure JBoss repo is enabled"
+  community.general.rhsm_repository:
+    name: "{{ jboss_version_repo }}"
+    state: "enabled"
+
+- name: "Install JBoss EAP group and its dependencies"
+  ansible.builtin.dnf:
+    name: "{{ jboss_eap_group }}"
+    state: "present"
+    update_cache: true
+
+- name: "Install maven"
+  ansible.builtin.dnf:
+    name: "{{ maven_group }}"
+    state: "present"
+
+- name: "Install git"
+  ansible.builtin.dnf:
+    name: "git"
+    state: present

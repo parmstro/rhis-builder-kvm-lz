@@ -1,0 +1,98 @@
+---
+# Create replacement IPA certs for cockpits Self-Signed Certs
+# Configure certs
+# The cockpit webserver loads the set of certificates
+# from the last file (linux std sort-wise) in the
+# /etc/cockpit/wscert.d directory with a *.cert extension
+# If you want to guarantee your certs are used, be aware of this
+# and name your file in cockpit_cert_path accordingly
+# or rename any old cert files.
+
+- name: "Ensure cockpit package are installed"
+  ansible.builtin.package:
+    name: cockpit
+    state: present
+
+- name: "Ensure that cockpit is started"
+  ansible.builtin.service:
+    name: cockpit.socket
+    enabled: true
+    state: started
+
+- name: "Ensure that the firewall is open"
+  ansible.builtin.service:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: "Ensure that the firewall is open"
+  ansible.posix.firewalld:
+    immediate: true
+    permanent: true
+    service: cockpit
+    state: enabled
+
+- name: "Set the http service owner nickname to cockpit"
+  ansible.builtin.set_fact:
+    service_owner_nickname: "cockpit"
+
+- name: "Ensure the http certificate exists"
+  ansible.builtin.include_role:
+    name: http_cert
+
+- name: "Clean up our files in the cockpit cert directory"
+  ansible.builtin.file:
+    path: "/etc/cockpit/ws-cert/z-*"
+    state: absent
+
+- name: "Copy the bundle to cockpit cert directory"
+  when: ansible_facts['distribution_major_version'] == "7"
+  ansible.builtin.copy:
+    src: "{{ crt_key_bundle_path }}"
+    dest: "{{ cockpit_bundle_path }}"
+    mode: "0744"
+    owner: "root"
+    group: "root"
+    remote_src: true
+
+- name: "Copy the crt to cockpit cert directory"
+  when: ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.copy:
+    src: "{{ ssl_crt_path }}"
+    dest: "{{ cockpit_crt_path }}"
+    mode: "0744"
+    owner: "root"
+    group: "root"
+    remote_src: true
+
+- name: "Copy the key to cockpit cert directory"
+  when: ansible_facts['distribution_major_version'] > "7"
+  ansible.builtin.copy:
+    src: "{{ ssl_private_key_path }}"
+    dest: "{{ cockpit_key_path }}"
+    mode: "0600"
+    owner: "root"
+    group: "root"
+    remote_src: true
+
+- name: "Update the sssd.conf file to allow AD logins to proceed"
+  ansible.builtin.blockinfile:
+    path: "/etc/sssd/sssd.conf"
+    block: |
+      default_shell = /bin/bash
+      override_shell = /bin/bash
+      override_homedir = /home/%u
+      fallback_homedir = /home/%u
+    backup: true
+    insertbefore: '\[sssd\]'
+    marker: "### ANSIBLE MANAGED BLOCK - for AD user access ###"
+
+- name: "Restart sssd Service"
+  ansible.builtin.service:
+    name: sssd
+    state: restarted
+
+- name: "Restart cockpit"
+  ansible.builtin.service:
+    name: cockpit.socket
+    state: restarted

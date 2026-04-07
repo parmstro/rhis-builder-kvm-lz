@@ -1,0 +1,26 @@
+---
+- name: "Ensure the proper repositories are enabled"
+  community.general.rhsm_repository:
+    name: "{{ idm_repository_ids }}"
+    state: enabled
+    purge: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_pre
+    - tags_idm_install
+
+# We are purposefully trying to update the system, hence latest.
+- name: "Update the system" # noqa: package-latest
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    disable_gpg_check: true
+    exclude: "intel-audio-firmware*"
+  async: "{{ async_timeout }}"
+  poll: "{{ async_delay }}"
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_pre
+    - tags_idm_install

@@ -1,0 +1,54 @@
+MiniRHIS BUG REPORT — EXECUTIVE SUMMARY
+Generated: 2026-03-29
+Workspace: /home/sgallego/GIT/MiniRHIS
+
+1) WHAT WAS FIXED (TODAY)
+- Satellite API/hammer readiness hardening (avoid false negatives).
+- PXE workflow hardening:
+	- enforce local TFTP proxy readiness
+	- ensure PXE prereq packages/services before PXE template build
+	- clearer fail messages/assertions for PXE generation
+- Role import hardening in `ensure_import_roles.yml`:
+	- fallback URL/user/password
+	- proxy-id discovery fallback
+	- strict-safe import-list handling (`vars['ansible_roles_import_list'] | default([])`)
+	- skip cleanly when no roles defined
+- satellite_pre reliability:
+	- package unlock pre-task
+	- reboot timeout made configurable and increased default resiliency
+- Installer orchestration hardening:
+	- package unlock before satellite-installer call sites
+	- healthcheck switched to `/api/status` readiness model
+	- first-pass satellite-installer explicitly uses org/location/admin vars + ansible plugin enables
+- Python installer parity updates:
+	- API-ready wait helper
+	- configurable retry/wait knobs
+	- package unlock and first-pass argument parity
+
+2) CLEAN-CONTAINER BEHAVIOR (IMPORTANT)
+When `MiniRHIS.sh` starts (or detects) the provisioner container:
+- It syncs local `container/roles/rhis-builder-*` into `/rhis/rhis-builder-*`
+	[HOTFIX SUMMARY - 2026-03-31]
+	- Patched `satellite_content_profile.yml` to remove recursive templating and set explicit organization/admin credentials.
+	- Added lifecycle environment labels and enabled lifecycle task debug to surface module errors.
+	- Installer now contains managed hotfix functions to apply these fixes into the provisioner container automatically.
+
+	via `sync_local_roles_to_container()`.
+- It then applies managed runtime patch guards via `apply_managed_container_patches()`.
+- Before each phase run and fallback run, it syncs local roles again.
+
+Result: a freshly pulled clean container is rehydrated with local hotfixes
+before role/playbook execution.
+
+3) GO / NO-GO CHECK
+GO: Current codebase is rolled up for next run with these components aligned:
+- `MiniRHIS.sh`
+- `rhis_installer.py`
+- `container/roles/**` (Satellite-related fixes)
+
+Operational note:
+- If `container/roles/**` local files are updated in the future, those local
+	changes become the source of truth pushed into the container at runtime.
+
+4) PRIMARY DETAILED REPORT
+- Full detail is in: `RHIS_Bug_report.txt`

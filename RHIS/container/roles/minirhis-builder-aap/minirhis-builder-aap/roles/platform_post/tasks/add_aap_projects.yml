@@ -1,0 +1,14 @@
+---
+
+# This tasks creates the projects
+- name: "Refresh the Anisble Automation Hub offline token" # noqa: command-instead-of-shell
+  ansible.builtin.shell: "{{ redhat_automation_hub_token_refresh_cmd }}"
+  register: token_refresh_result
+  changed_when: token_refresh_result.rc == 0
+
+- name: "Add the projects to the controller"
+  ansible.builtin.include_tasks: "ensure_aap_project.yml"
+  loop: "{{ projects }}"
+  loop_control:
+    loop_var: project
+  no_log: true

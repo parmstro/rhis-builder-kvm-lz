@@ -1,0 +1,24 @@
+---
+
+# do the actual snapshot action - one of present, absent, revert, remove_all
+
+- name: "Snapshot Action - snapshot state set to: {{ current_state }} for host: {{ item.name }}" # noqa: name[template]
+  vmware.vmware.vm_snapshot:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ datacenter_name }}"
+    folder: "{{ datacenter_folder }}"
+    name: "{{ item.name }}"
+    state: "{{ current_state }}"
+    snapshot_name: "{{ item.snap_name }}"
+    description: "{{ item.snap_description }}"
+    quiesce: "{{ item.quiesce }}"
+    validate_certs: false
+  delegate_to: localhost
+
+- name: "If we quiesed the system, wait for it to respond"
+  when: item.quiesce
+  ansible.builtin.wait_for_connection:
+    delay: 5
+    timeout: 300

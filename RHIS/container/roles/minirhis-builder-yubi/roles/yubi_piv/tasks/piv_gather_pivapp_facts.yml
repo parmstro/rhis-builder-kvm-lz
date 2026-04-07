@@ -1,0 +1,40 @@
+---
+- name: "Ensure the secure directory exists"
+  ansible.builtin.file:
+    path: "{{ piv_tmp_secure_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: "Read the piv app info"
+  ansible.builtin.command: "ykman piv info"
+  register: yubi_piv_info
+
+- name: "Register the piv_versio"
+  ansible.builtin.set_fact:
+    piv_version: "{{ yubi_piv_info.stdout_lines[0] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the PIV pin retries remaining"
+  ansible.builtin.set_fact:
+    piv_pin_retries_remaining: "{{ yubi_info.stdout_lines[1] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the management key algorithm"
+  ansible.builtin.set_fact:
+    piv_mgmt_key_algorithm: "{{ yubi_info.stdout_lines[2] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the PIV CHUID"
+  ansible.builtin.set_fact:
+    piv_chuid: "{{ yubi_info.stdout_lines[3] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register the PIV CCC"
+  ansible.builtin.set_fact:
+    piv_ccc: "{{ yubi_info.stdout_lines[4] | regex_search('(?<=:).+') | trim }}"
+
+- name: "Register Slot 9a configuration"
+  ansible.builtin.set_fact:
+    piv_slot_9a: "{{ yubi_info.stdout_lines[5-12] }}"
+
+- name: "Debug"
+  ansible.builtin.debug:
+    var: piv_device_type, piv_device_serial, piv_device_fw_ver, piv_device_formfactor, piv_device_if_usb, piv_device_nfc_enabled

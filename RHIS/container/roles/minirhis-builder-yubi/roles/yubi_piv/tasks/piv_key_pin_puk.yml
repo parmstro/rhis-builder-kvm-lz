@@ -1,0 +1,63 @@
+---
+
+- name: "Generate a new random AES256 piv management key from the kernel"
+  ansible.builtin.shell: "head /dev/urandom | sha256sum | head -c64"
+  register: random_key_result
+
+- name: "Store the new management key"
+  ansible.builtin.set_fact:
+    piv_management_key: "{{ random_key_result.stdout }}"
+  
+- name: "Configure the yubikey with a new management key"
+  when: not piv_mgmt_key_protect
+  ansible.builtin.command: "ykman piv access change-management-key --algorithm AES256 --new-management-key {{ piv_management_key }} --management-key {{ piv_factory_default_management_key }} --force"
+
+- name: "Configure the yubikey with a new management key"
+  when: piv_mgmt_key_protect
+  ansible.builtin.command: "ykman piv access change-management-key --algorithm AES256 --new-management-key {{ piv_management_key }} --management-key {{ piv_factory_default_management_key }} --protect --pin {{ piv_mgmt_key_pin }} --force"
+
+- name: "Configure pin / puk retries"
+  ansible.builtin.command: "ykman piv access set-retries --management-key {{ piv_management_key }} --pin {{ piv_factory_default_pin }} --force {{ piv_pin_retries }} {{ piv_puk_retries }}"
+  register: piv_retries_result
+
+- name: "The retries for pin and puk have been set."
+  ansible.builtin.debug:
+    var: piv_retries_result
+
+- name: "Generate a new random pin from the kernel"
+  when: not piv_FIPS_enabled
+  ansible.builtin.shell: "echo $(((RND=((RANDOM<<15|RANDOM)<<15|RANDOM)))) | head -c6"
+  register: random_pin_result
+
+- name: "Generate a new random pin from the kernel"
+  when: piv_FIPS_enabled
+  ansible.builtin.shell: "echo $(((RND=((RANDOM<<15|RANDOM)<<15|RANDOM)))) | head -c8"
+  register: random_FIPS_pin_result
+
+- name: "Store the new pin"
+  ansible.builtin.set_fact:
+    piv_initial_pin: "{{ random_pin_result.stdout }}"
+
+- name: "Configure new pin"
+  ansible.builtin.command: "ykman piv access change-pin --pin {{ piv_factory_default_pin }} --new-pin {{ piv_initial_pin }}"
+  register: piv_new_pin_result
+
+- name: "The new pin has been saved in the secure directory or idm vault."
+  ansible.builtin.debug:
+    var: piv_new_pin_result
+
+- name: "Generate a new random PUK from the kernel"
+  ansible.builtin.shell: "echo $(((RND=((RANDOM<<15|RANDOM)<<15|RANDOM)))) | head -c8"
+  register: random_puk_result
+
+- name: "Store the new puk"
+  ansible.builtin.set_fact:
+    piv_initial_puk: "{{ random_puk_result.stdout }}"
+
+- name: "Configure new puk"
+  ansible.builtin.command: "ykman piv access change-puk --puk {{ piv_factory_default_puk }} --new-puk {{ piv_initial_puk }}"
+  register: piv_new_puk_result
+
+- name: "The new pin has been saved in the secure directory or idm vault."
+  ansible.builtin.debug:
+    var: piv_new_puk_result

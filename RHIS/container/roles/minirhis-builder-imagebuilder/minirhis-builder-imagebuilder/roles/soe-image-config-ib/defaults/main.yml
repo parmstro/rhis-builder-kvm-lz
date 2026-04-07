@@ -1,0 +1,3 @@
+---
+
+default_osbuild_repo_dir: "/etc/osbuild-composer/repositories"

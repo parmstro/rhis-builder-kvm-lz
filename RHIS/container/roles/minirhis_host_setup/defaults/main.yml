@@ -1,0 +1,15 @@
+---
+# Defaults for rhis_host_setup role
+rhis_firewall_ports:
+  - "3000/tcp"   # RHIS dashboard / API
+
+rhis_libvirt_packages:
+  - libvirt
+  - libvirt-daemon
+  - libvirt-client
+
+rhis_selinux_http_port: 3000
+
+rhis_libvirt_group: libvirt
+
+rhis_polkit_rule_path: /etc/polkit-1/rules.d/80-libvirt-unix.rules

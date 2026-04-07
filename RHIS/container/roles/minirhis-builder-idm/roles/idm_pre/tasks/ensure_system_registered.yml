@@ -1,0 +1,58 @@
+---
+
+- name: Register to Red Hat Portal {{ inventory_hostname }} (activation key with
+    fallback)
+  when:
+    - not register_to_satellite
+    - (cdn_organization_vault | default('') | length) > 0
+    - (cdn_activation_key_vault | default('') | length) > 0
+  block:
+    - name: Try RHSM registration via activation key
+      ansible.builtin.include_role:
+        name: redhat.rhel_system_roles.rhc
+      vars:
+        rhc_auth:
+          activation_keys:
+            keys:
+              - "{{ cdn_activation_key_vault }}"
+        rhc_organization: "{{ cdn_organization_vault }}"
+        rhc_insights:
+          state: "{{ rhc_insights_state }}"
+          autoupdate: "{{ rhc_enable_auto_update }}"
+  rescue:
+    - name: Fallback RHSM registration via username/password
+      ansible.builtin.include_role:
+        name: redhat.rhel_system_roles.rhc
+      vars:
+        rhc_auth:
+          username: "{{ rh_user }}"
+          password: "{{ rh_pass }}"
+        rhc_insights:
+          state: "{{ rhc_insights_state }}"
+          autoupdate: "{{ rhc_enable_auto_update }}"
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_pre
+    - tags_idm_install
+
+- name: Register to Red Hat Portal {{ inventory_hostname }} (username/password
+    fallback)
+  when:
+    - not register_to_satellite
+    - (cdn_organization_vault | default('') | length) == 0 or
+      (cdn_activation_key_vault | default('') | length) == 0
+  ansible.builtin.include_role:
+    name: redhat.rhel_system_roles.rhc
+  vars:
+    rhc_auth:
+      username: "{{ rh_user }}"
+      password: "{{ rh_pass }}"
+    rhc_insights:
+      state: "{{ rhc_insights_state }}"
+      autoupdate: "{{ rhc_enable_auto_update }}"
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_pre
+    - tags_idm_install

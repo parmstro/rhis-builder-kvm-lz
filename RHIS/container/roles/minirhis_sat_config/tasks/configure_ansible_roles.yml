@@ -1,0 +1,83 @@
+---
+# tasks/configure_ansible_roles.yml — rhis_sat_config
+# Import Ansible roles into Satellite so they are available in host groups.
+
+- name: "Skip role import when no ansible roles are defined"
+  when: (rhis_sat_config_ansible_roles_import_list | default([]) | length) == 0
+  ansible.builtin.debug:
+    msg: "No ansible roles defined for import; skipping Satellite ansible role
+      sync."
+  tags:
+    - tags_sat_config_ansible_roles
+
+- name: "Discover Satellite proxy ID for ansible role import"
+  when: (rhis_sat_config_ansible_roles_import_list | default([]) | length) > 0
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Query Satellite smart proxies"
+      redhat.satellite.resource_info:
+        resource: smart_proxies
+      register: _sat_import_proxies
+      no_log: true
+      tags:
+        - tags_sat_config_ansible_roles
+
+- name: "Resolve Satellite proxy ID for ansible role import"
+  when: (rhis_sat_config_ansible_roles_import_list | default([]) | length) > 0
+  ansible.builtin.set_fact:
+    _sat_import_proxy_id: >-
+      {{
+        (
+          _sat_import_proxies.resources
+          | selectattr('name', 'equalto', inventory_hostname)
+          | map(attribute='id')
+          | list
+          | first
+        )
+        | default(
+            (
+              _sat_import_proxies.resources
+              | map(attribute='id')
+              | list
+              | first
+            ),
+            true
+          )
+      }}
+  no_log: true
+  tags:
+    - tags_sat_config_ansible_roles
+
+- name: "Assert proxy ID exists for ansible role import"
+  when: (rhis_sat_config_ansible_roles_import_list | default([]) | length) > 0
+  ansible.builtin.assert:
+    that:
+      - (_sat_import_proxy_id | default('') | string | length) > 0
+    fail_msg: "Unable to determine Satellite proxy_id for ansible role import."
+  tags:
+    - tags_sat_config_ansible_roles
+
+- name: "Import ansible roles into Satellite"
+  when: (rhis_sat_config_ansible_roles_import_list | default([]) | length) > 0
+  ansible.builtin.uri:
+    url: "{{ satellite_url }}/ansible/api/ansible_roles/sync"
+    method: "PUT"
+    user: "{{ satellite_username }}"
+    password: "{{ satellite_password }}"
+    force_basic_auth: true
+    body:
+      proxy_id: "{{ _sat_import_proxy_id }}"
+      role_names: "{{ rhis_sat_config_ansible_roles_import_list }}"
+    body_format: "json"
+    status_code:
+      - 200
+      - 201
+    timeout: 300
+  no_log: true
+  tags:
+    - tags_sat_config_ansible_roles

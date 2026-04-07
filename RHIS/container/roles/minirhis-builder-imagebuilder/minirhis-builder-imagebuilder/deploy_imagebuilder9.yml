@@ -1,0 +1,45 @@
+---
+# This playbook deploys and configures the image builder software on RHEL 7 and RHEL 8
+#
+
+- name: "Deploying Image Builder on RHEL9"
+  hosts: all
+  gather_facts: true
+
+  vars:
+    composer_main_pkg: "osbuild-composer"
+
+  tasks:
+
+  # packages are available in base repos.
+  # for completeness, we would check registration and repository configuration
+  # but we aren't going to as this system will always be installed by
+  # Satellite
+    - name: "Install imagebuilder packages"
+      ansible.builtin.dnf:
+        name:
+          - "{{ composer_main_pkg }}"
+          - composer-cli
+          - cockpit
+          - cockpit-composer
+          - bash-completion
+        state: present
+
+    - name: "Enable composer socket"
+      ansible.builtin.service:
+        name: "{{ composer_main_pkg }}.socket"
+        state: started
+        enabled: true
+
+    - name: "Enable cockpit socket"
+      ansible.builtin.service:
+        name: cockpit.socket
+        state: started
+        enabled: true
+
+    - name: "Configure firewall for services"
+      ansible.posix.firewalld:
+        service: cockpit
+        state: enabled
+        immediate: true
+        permanent: true

@@ -1,0 +1,6 @@
+# RHIS fallback chrony template (auto-generated when upstream template is missing)
+driftfile /var/lib/chrony/drift
+makestep 1.0 3
+rtcsync
+logdir /var/log/chrony
+pool 2.rhel.pool.ntp.org iburst

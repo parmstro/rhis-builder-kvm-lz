@@ -1,0 +1,92 @@
+---
+# rhis_libvirt_networks/tasks/main.yml
+# Ensures the RHIS 'external' (NAT) and 'internal' (static) libvirt networks
+# exist, are active, and set to autostart.
+
+- name: Verify virsh is available
+  ansible.builtin.command: virsh --version
+  register: virsh_check
+  changed_when: false
+  failed_when: virsh_check.rc != 0
+
+# ── external (NAT/DHCP) network ───────────────────────────────────────────────
+
+- name: Check if 'external' libvirt network exists
+  ansible.builtin.command: virsh net-info {{ rhis_external_network_name }}
+  register: ext_net_info
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Render external network XML definition
+  ansible.builtin.template:
+    src: external_network.xml.j2
+    dest: /tmp/rhis_external_network.xml
+    mode: "0644"
+  when: ext_net_info.rc != 0
+
+- name: Define 'external' libvirt network
+  ansible.builtin.command: virsh net-define /tmp/rhis_external_network.xml
+  become: true
+  when: ext_net_info.rc != 0
+  notify: Clean up network XML temps
+
+- name: Start 'external' network if not active
+  ansible.builtin.command: virsh net-start {{ rhis_external_network_name }}
+  become: true
+  register: ext_start
+  failed_when:
+    - ext_start.rc != 0
+    - "'already active' not in (ext_start.stderr | default(''))"
+  changed_when: ext_start.rc == 0
+
+- name: Set 'external' network to autostart
+  ansible.builtin.command: virsh net-autostart {{ rhis_external_network_name }}
+  become: true
+  changed_when: false
+
+# ── internal (static, no DHCP) network ───────────────────────────────────────
+
+- name: Check if 'internal' libvirt network exists
+  ansible.builtin.command: virsh net-info {{ rhis_internal_network_name }}
+  register: int_net_info
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Render internal network XML definition
+  ansible.builtin.template:
+    src: internal_network.xml.j2
+    dest: /tmp/rhis_internal_network.xml
+    mode: "0644"
+  when: int_net_info.rc != 0
+
+- name: Define 'internal' libvirt network
+  ansible.builtin.command: virsh net-define /tmp/rhis_internal_network.xml
+  become: true
+  when: int_net_info.rc != 0
+  notify: Clean up network XML temps
+
+- name: Start 'internal' network if not active
+  ansible.builtin.command: virsh net-start {{ rhis_internal_network_name }}
+  become: true
+  register: int_start
+  failed_when:
+    - int_start.rc != 0
+    - "'already active' not in (int_start.stderr | default(''))"
+  changed_when: int_start.rc == 0
+
+- name: Set 'internal' network to autostart
+  ansible.builtin.command: virsh net-autostart {{ rhis_internal_network_name }}
+  become: true
+  changed_when: false
+
+- name: List all libvirt networks (verification)
+  ansible.builtin.command: virsh net-list --all
+  register: net_list
+  changed_when: false
+  become: true
+
+- name: Show libvirt network list
+  ansible.builtin.debug:
+    msg: "{{ net_list.stdout_lines }}"

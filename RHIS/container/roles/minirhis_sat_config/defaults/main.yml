@@ -1,0 +1,167 @@
+---
+# defaults/main.yml — rhis_sat_config
+# All values resolve from existing RHIS host_vars/group_vars; these are fallbacks only.
+
+# Core connection
+satellite_url: "https://{{ sat_hostname | default('satellite.prod.spg') }}"
+satellite_username: "{{ sat_admin_user | default(admin_user | default('admin')) }}"
+satellite_password: "{{ sat_admin_pass | default(global_admin_password) | default('') }}"
+satellite_validate_certs: false
+
+# Org / Location
+satellite_organization: "{{ sat_org | default('REDHAT') }}"
+satellite_location: "{{ sat_loc | default('CORE') }}"
+
+# Network
+rhis_sat_config_domain: "{{ domain | default('prod.spg') }}"
+rhis_sat_config_sat_ip: "{{ sat_ip | default('10.168.128.1') }}"
+rhis_sat_config_provisioning_net: "{{ sat_provisioning_subnet | default('10.168.0.0') }}"
+rhis_sat_config_provisioning_mask: "{{ sat_provisioning_netmask | default('255.255.0.0') }}"
+rhis_sat_config_dhcp_from: "{{ sat_provisioning_dhcp_start | default('10.168.128.100') }}"
+rhis_sat_config_dhcp_to: "{{ sat_provisioning_dhcp_end | default('10.168.128.200') }}"
+
+# Libvirt
+rhis_sat_config_libvirt_url: "{{ rhis_sat_libvirt_url |
+  default('qemu+ssh://root@' + (host_int_ip | default('10.168.0.1')) +
+  '/system') }}"
+
+# RHEL majors to iterate over
+rhis_sat_config_rhel_majors:
+  - "9"
+  - "10"
+
+rhis_sat_config_lifecycle_stages:
+  - "DEV"
+  - "TEST"
+  - "PROD"
+
+# Hammer settings applied via ansible.builtin.command
+rhis_sat_config_settings:
+  - name: inventory_upload
+    value: "true"
+  - name: content_default_http_proxy
+    value: ""
+  - name: remote_execution_ssh_user
+    value: "root"
+
+# Partition tables to create
+rhis_sat_config_partition_tables:
+  - name: "Kickstart default thin"
+    os_family: "Redhat"
+    snippet: false
+    file: "/usr/share/foreman/app/views/unattended/partition_tables/kickstart_defau\
+      lt_thin.erb"
+
+# Repository-sets to enable for each RHEL major version
+rhis_sat_config_repo_sets:
+  - product: "Red Hat Enterprise Linux for x86_64"
+    name_template: "Red Hat Enterprise Linux {{ rel }} for x86_64 - BaseOS (RPMs)"
+    use_releasever: true
+  - product: "Red Hat Enterprise Linux for x86_64"
+    name_template: "Red Hat Enterprise Linux {{ rel }} for x86_64 - AppStream (RPMs)"
+    use_releasever: true
+  - product: "Red Hat Enterprise Linux for x86_64"
+    name_template: "Red Hat Satellite Client 6 for RHEL {{ rel }} x86_64 (RPMs)"
+    use_releasever: false
+  - product: "Red Hat Enterprise Linux for x86_64"
+    name_template: "Red Hat Enterprise Linux {{ rel }} for x86_64 - High Availability (RPMs)"
+    use_releasever: true
+  - product: "Red Hat Ansible Automation Platform 2.6 for RHEL {{ rel }} x86_64"
+    name_template: "Red Hat Ansible Automation Platform 2.6 for RHEL {{ rel }} x86_64 (RPMs)"
+    use_releasever: false
+
+# Content view / activation key naming
+rhis_sat_config_content_view_prefix: "CV_RHEL"
+rhis_sat_config_activation_key_prefix: "ak-rhel"
+
+# Installation media
+rhis_sat_config_media:
+  - name: "RHEL_9_x86_64"
+    path: "http://mirror.stream.centos.org/9-stream/BaseOS/x86_64/os/"
+    os_family: "Redhat"
+  - name: "RHEL_10_x86_64"
+    path: "http://mirror.stream.centos.org/10-stream/BaseOS/x86_64/os/"
+    os_family: "Redhat"
+
+# Custom product
+rhis_sat_config_custom_product: "Custom_Internal_Content"
+rhis_sat_config_sync_plan_name: "Daily_Sync_Plan"
+rhis_sat_config_sync_plan_interval: "daily"
+rhis_sat_config_sync_plan_time: "02:00:00"
+
+# Compute resource
+rhis_sat_config_compute_resource:
+  name: "Libvirt_Lab"
+  provider: "Libvirt"
+  organizations:
+    - "{{ satellite_organization }}"
+  locations:
+    - "{{ satellite_location }}"
+
+# Compute profile
+rhis_sat_config_compute_profile_name: "Standard_Server"
+rhis_sat_config_compute_attributes:
+  cpus: 2
+  memory: 4294967296
+
+# Hostgroup naming and classes
+rhis_sat_config_hostgroup_name_prefix: "HG_RHEL"
+rhis_sat_config_hostgroup_classes:
+  - name_suffix: "Management"
+    with_compute: false
+    ansible_roles:
+      - "rhel-system-roles.timesync"
+  - name_suffix: "Compute"
+    with_compute: true
+    ansible_roles:
+      - "rhel-system-roles.network"
+      - "rhel-system-roles.timesync"
+
+# Roles to import into Satellite before hostgroup role assignment
+rhis_sat_config_ansible_roles_import_list:
+  - "rhel-system-roles.network"
+  - "rhel-system-roles.timesync"
+
+# Virt-who
+rhis_sat_config_virtwho_name: "VirtWho_Libvirt"
+rhis_sat_config_virtwho_hypervisor_server: "{{ host_int_ip | default('10.168.0.1') }}"
+rhis_sat_config_virtwho_interval: 720
+
+# Compliance reporting
+rhis_sat_config_compliance_policy_name: "Monthly_Security_Audit_RHEL_9_10"
+rhis_sat_config_compliance_period: "monthly"
+rhis_sat_config_compliance_day_of_month: 1
+rhis_sat_config_scap_content_id: 1
+rhis_sat_config_scap_profile_id: "xccdf_org.ssgproject.content_profile_stig"
+rhis_sat_config_compliance_hostgroups:
+  - "{{ rhis_sat_config_hostgroup_name_prefix }}9_Management"
+  - "{{ rhis_sat_config_hostgroup_name_prefix }}9_Compute"
+  - "{{ rhis_sat_config_hostgroup_name_prefix }}10_Management"
+  - "{{ rhis_sat_config_hostgroup_name_prefix }}10_Compute"
+
+rhis_sat_config_report_template_name: "Host - Compliance Status"
+rhis_sat_config_report_search: "hostgroup_name ~ HG_RHEL9 or hostgroup_name ~ HG_RHEL10"
+rhis_sat_config_report_email: "admin@prod.spg"
+rhis_sat_config_report_cron: "0 0 1 * *"
+
+rhis_sat_config_delivery_method: "smtp"
+rhis_sat_config_smtp_address: "localhost"
+rhis_sat_config_content_batch_size: "100"
+rhis_sat_config_openscap_store_arf: "true"
+
+# Reporting settings applied as a loop (avoids 4 separate tasks)
+rhis_sat_config_reporting_settings:
+  - { name: delivery_method, value: "{{ rhis_sat_config_delivery_method }}" }
+  - { name: smtp_address, value: "{{ rhis_sat_config_smtp_address }}" }
+  - { name: content_batch_size, value: "{{ rhis_sat_config_content_batch_size }}" }
+  - { name: openscap_store_arf, value: "{{ rhis_sat_config_openscap_store_arf }}" }
+
+# Provisioning mode validation
+rhis_sat_config_require_kickstart_provisioning: true
+
+# RH cloud mismatched host auto-delete discovery
+rhis_sat_config_enable_rhcloud_mismatch_autodelete: true
+rhis_sat_config_rhcloud_mismatch_setting_name: ""
+rhis_sat_config_rhcloud_mismatch_setting_discovery_regex: >-
+  (cloud|rhcloud).*(mismatch|mismatched).*(delete|deletion)|
+  (delete|deletion).*(mismatch|mismatched).*(cloud|rhcloud)

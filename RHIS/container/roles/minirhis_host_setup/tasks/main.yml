@@ -1,0 +1,147 @@
+---
+# rhis_host_setup/tasks/main.yml
+# Sets up the RHIS installer host: libvirtd, firewalld, SELinux, polkit.
+
+- name: Gather OS facts
+  ansible.builtin.setup:
+    gather_subset:
+      - distribution
+      - os_family
+
+# ── libvirt ──────────────────────────────────────────────────────────────────
+
+- name: Ensure libvirt packages are installed
+  ansible.builtin.dnf:
+    name: "{{ rhis_libvirt_packages }}"
+    state: present
+    disable_gpg_check: true
+  become: true
+
+- name: Enable and start libvirtd
+  ansible.builtin.systemd:
+    name: libvirtd
+    enabled: true
+    state: started
+  become: true
+
+- name: Verify libvirtd is active
+  ansible.builtin.command: systemctl is-active libvirtd
+  register: libvirtd_state
+  changed_when: false
+  failed_when: libvirtd_state.rc != 0
+  become: true
+
+# ── polkit rule so non-root users in 'libvirt' group can manage qemu:///system ─
+
+- name: Ensure polkit rules directory exists
+  ansible.builtin.file:
+    path: /etc/polkit-1/rules.d
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Deploy libvirt polkit rule
+  ansible.builtin.copy:
+    dest: "{{ rhis_polkit_rule_path }}"
+    mode: "0644"
+    content: |
+      /* Allow members of the libvirt / libvirt-qemu group to manage libvirt */
+      polkit.addRule(function(action, subject) {
+          var managed_actions = [
+              "org.libvirt.unix.manage",
+              "org.freedesktop.libvirt.unix.manage"
+          ];
+          if (managed_actions.indexOf(action.id) >= 0) {
+              if (subject.isInGroup("libvirt") || subject.isInGroup("libvirt-qemu")) {
+                  return polkit.Result.YES;
+              }
+          }
+      });
+  become: true
+  notify: Reload polkit
+
+- name: Ensure ansible runner user is in the libvirt group
+  ansible.builtin.user:
+    name: "{{ ansible_user_id }}"
+    groups: "{{ rhis_libvirt_group }}"
+    append: true
+  become: true
+
+# ── firewalld ─────────────────────────────────────────────────────────────────
+
+- name: Ensure firewalld is installed
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  become: true
+
+- name: Enable and start firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  become: true
+
+- name: Open RHIS ports permanently
+  ansible.posix.firewalld:
+    port: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ rhis_firewall_ports }}"
+  become: true
+
+- name: Allow SSH service in firewalld
+  ansible.posix.firewalld:
+    service: ssh
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+
+- name: Allow libvirt service in firewalld
+  ansible.posix.firewalld:
+    service: libvirt
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true
+  ignore_errors: true   # libvirt service may not exist in all firewalld versions
+
+# ── SELinux port labels ───────────────────────────────────────────────────────
+
+- name: Check if SELinux is enforcing or permissive
+  ansible.builtin.command: getenforce
+  register: selinux_mode
+  changed_when: false
+  failed_when: false
+
+- name: Ensure policycoreutils-python-utils is installed (for semanage)
+  ansible.builtin.dnf:
+    name: policycoreutils-python-utils
+    state: present
+  become: true
+  when: selinux_mode.stdout | default('Disabled') != 'Disabled'
+
+- name: Check if port {{ rhis_selinux_http_port }} already has http_port_t label
+  ansible.builtin.command: >
+    semanage port -l
+  register: semanage_ports
+  changed_when: false
+  failed_when: false
+  become: true
+  when: selinux_mode.stdout | default('Disabled') != 'Disabled'
+
+- name: Add SELinux http_port_t label for port {{ rhis_selinux_http_port }}
+  ansible.builtin.command: >
+    semanage port -a -t http_port_t -p tcp {{ rhis_selinux_http_port }}
+  become: true
+  when:
+    - selinux_mode.stdout | default('Disabled') != 'Disabled'
+    - semanage_ports.stdout is defined
+    - "'http_port_t' not in semanage_ports.stdout or rhis_selinux_http_port | string not in semanage_ports.stdout"
+  register: semanage_add
+  failed_when:
+    - semanage_add.rc is defined
+    - semanage_add.rc != 0
+    - "'already defined' not in (semanage_add.stderr | default(''))"

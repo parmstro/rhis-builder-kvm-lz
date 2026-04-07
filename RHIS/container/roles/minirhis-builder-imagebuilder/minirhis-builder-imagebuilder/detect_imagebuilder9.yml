@@ -1,0 +1,80 @@
+---
+# This detects the image builder 9 system"
+
+- name: "Detect Image Builder on RHEL9"
+  hosts: all
+  gather_facts: true
+
+  tasks:
+
+    - name: "Assume the host does not exist"
+      ansible.builtin.set_fact:
+        host_exists: false
+
+    - name: "Check Satellite to see if the host is the process of being built?"
+      ansible.builtin.include_tasks: "get_foreman_list.yml"
+      vars:
+        gfl_satellite_username: "{{ satellite_username | default(omit) }}"
+        gfl_satellite_password: "{{ satellite_password | default(omit) }}"
+        gfl_satellite_use_gssapi: "{{ satellite_use_gssapi | default(omit) }}"
+        gfl_satellite_server_url: "{{ satellite_url }}"
+        gfl_satellite_validate_certs: "{{ satellite_validate_certs }}"
+        gfl_satellite_organization: "{{ host.organization | default(omit) }}"
+        gfl_satellite_params: "{{ host.params | default(omit) }}"
+        gfl_satellite_resource: "hosts"
+        gfl_satellite_search_string: "name = {{ host.fqdn }}"  # " and build_status = pending"
+
+    - name: "If the host is being built, wait for it to be up"
+      when:
+        - (gfl_resources | length) > 0
+        - gfl_resources[0].build_status_label is search("Pending")
+      ansible.builtin.wait_for:
+        timeout: 60
+        sleep: 10
+        port: 22
+        host: "{{ host.fqdn }}"
+        search_regex: OpenSSH
+
+    - name: "If we found our host, host should exist"
+      when: (gfl_resources | length) < 1
+      ansible.builtin.set_fact:
+        host_exists: false
+
+    - name: "Continue checks, can we resolve the host and is it reachable"
+      when: not host_exists
+      block:
+
+        - name: "Can we resolve the host?"
+          ansible.builtin.assert:
+            that: "{{ host.fqdn is ansible.utils.resolvable }}"
+
+        - name: "Can we ssh to host?"
+          ansible.builtin.wait_for:
+            timeout: 60
+            sleep: 10
+            port: 22
+            host: "{{ host.fqdn }}"
+            search_regex: OpenSSH
+
+        - name: "Is the host responsive?"
+          ansible.builtin.command: "echo 'I am alive.'"
+          delegate_to: "{{ host.fqdn }}"
+          changed_when: true
+          register: result
+
+        - name: "The host exists"
+          ansible.builtin.set_fact:
+            host_exists: true
+          when: result.stdout == "I am alive."
+
+      rescue:
+
+        - name: "The host does not exist"
+          ansible.builtin.set_fact:
+            host_exists: false
+
+
+    - name: "Fail if we didn't find a host"
+      when: not host_exists
+      ansible.builtin.fail:
+        msg: "No host found"

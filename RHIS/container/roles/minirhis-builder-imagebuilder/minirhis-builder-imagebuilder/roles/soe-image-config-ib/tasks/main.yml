@@ -1,0 +1,107 @@
+---
+
+# Create or Update the system repositories for an imagebuilder host
+
+- name: "Unregister the imagebuilder host"
+  community.general.redhat_subscription:
+    state: absent
+
+- name: "Register the imagebuilder host to the target satellite using activation key"
+#   community.general.redhat_subscription:
+#     activationkey: "{{ target_activationkey }}"
+#     org_id: "{{ target_organization }}"
+#     state: present
+  ansible.builtin.command: "subscription-manager register --org {{ target_organization }} --activationkey {{ target_activationkey }}"
+  changed_when: true
+
+- name: "Ensure the /etc/osbuild-composer has the proper permissions according to https://access.redhat.com/solutions/6998173"
+  ansible.builtin.file:
+    path: "/etc/osbuild-composer"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Ensure the repo config directory exists"
+  ansible.builtin.file:
+    path: "{{ osbuild_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Ensure the toml directory exists"
+  ansible.builtin.file:
+    path: "{{ osbuild_toml_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Clean up existing additional sources"
+  ansible.builtin.include_tasks: "remove_existing_sources.yml"
+
+# This nicely resolves $releasever
+- name: "Get the current BaseOS URL for the registered environment and content view" # noqa risky-shell-pipe
+  ansible.builtin.shell: grep '/baseos' /etc/yum.repos.d/redhat.repo | sed -e 's/baseurl = //'
+  register: result
+  changed_when: true
+
+- name: "Set the system baseos repo"
+  ansible.builtin.set_fact:
+    satellite_current_baseos_repo_url: "{{ result.stdout | regex_replace('$releasever', ansible_distribution_major_version) }}"
+
+- name: "Get the current AppStream URL for the registered environment and content view" # noqa risky-shell-pipe
+  ansible.builtin.shell: grep '/appstream' /etc/yum.repos.d/redhat.repo | sed -e 's/baseurl = //'
+  register: result
+  changed_when: true
+
+- name: "Set the system appstream repo"
+  ansible.builtin.set_fact:
+    satellite_current_appstream_repo_url: "{{ result.stdout | regex_replace('$releasever', ansible_distribution_major_version) }}"
+
+- name: "Template the system repository file"
+  ansible.builtin.template:
+    src: "rhel-{{ ansible_distribution_major_version }}.json.{{ ansible_architecture }}.j2"
+    dest: "{{ default_osbuild_repo_dir }}/rhel-{{ ansible_distribution_version }}.json"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "Verify the format of the system repository file"
+  ansible.builtin.shell: "json_verify < {{ default_osbuild_repo_dir }}/rhel-{{ ansible_distribution_version }}.json" # noqa yaml[line-length]
+  register: result
+  changed_when: true
+
+- name: "Assert the JSON is valid"
+  ansible.builtin.assert:
+    that: result.stdout == "JSON is valid"
+  notify: "Restart osbuild-composer"
+
+- name: "Create a dictionary of other enabled Satellite repositories"
+  ansible.builtin.include_tasks: "create_repo_dict.yml"
+
+- name: "Debug Print"
+  ansible.builtin.debug:
+    var: additional_sources
+
+- name: "Ensure additional sources exist for other enabled repositories"
+  ansible.builtin.include_tasks: "ensure_additional_source.yml"
+  loop: "{{ additional_sources }}"
+  loop_control:
+    loop_var: source
+
+- name: "Stop all osbuild services" # noqa command-instead-of-module
+  ansible.builtin.command: "systemctl stop osbuild\\*"
+  changed_when: true
+
+- name: "Reset failed state on all osbuild services"  # noqa command-instead-of-module
+  ansible.builtin.command: "systemctl reset-failed osbuild\\*"
+  changed_when: true
+
+- name: "Restart the osbuild socket"
+  ansible.builtin.systemd_service:
+    name: "osbuild-composer.socket"
+    state: started
+
+# - name: "Verify the configuration"

@@ -1,0 +1,57 @@
+---
+# tasks/configure_lifecycle_content.yml — rhis_sat_config
+# Creates lifecycle paths, content views, and activation keys per RHEL major.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure lifecycle environments (DEV → TEST → PROD) for each RHEL major"
+      redhat.satellite.lifecycle_environment:
+        organization: "{{ satellite_organization }}"
+        name: "{{ item[0] }}_RHEL_{{ item[1] }}_x86_64"
+        prior: >-
+          {{ 'Library' if (item[0] == 'DEV') else
+             (item[0] | replace('TEST', 'DEV') | replace('PROD', 'TEST'))
+             + '_RHEL_' + item[1] + '_x86_64' }}
+        state: present
+      loop: "{{ rhis_sat_config_lifecycle_stages |
+        product(rhis_sat_config_rhel_majors) | list }}"
+      loop_control:
+        label: "{{ item[0] }}_RHEL_{{ item[1] }}_x86_64"
+      no_log: true
+      tags:
+        - tags_sat_config_lifecycle
+
+    - name: "Ensure content view for RHEL {{ item }}"
+      redhat.satellite.content_view:
+        organization: "{{ satellite_organization }}"
+        name: "{{ rhis_sat_config_content_view_prefix }}_{{ item }}"
+        description: "RHIS content view for RHEL {{ item }}"
+        state: present
+      loop: "{{ rhis_sat_config_rhel_majors }}"
+      no_log: true
+      tags:
+        - tags_sat_config_content
+
+    - name: "Ensure activation keys for each lifecycle stage and RHEL major"
+      redhat.satellite.activation_key:
+        organization: "{{ satellite_organization }}"
+        name: "{{ rhis_sat_config_activation_key_prefix }}{{ item[0] }}-{{ item[1] |
+          lower }}"
+        lifecycle_environment: "{{ item[1] }}_RHEL_{{ item[0] }}_x86_64"
+        content_view: "{{ rhis_sat_config_content_view_prefix }}_{{ item[0] }}"
+        unlimited_hosts: true
+        state: present
+      loop: "{{ rhis_sat_config_rhel_majors |
+        product(rhis_sat_config_lifecycle_stages) | list }}"
+      loop_control:
+        label: "{{ rhis_sat_config_activation_key_prefix }}{{ item[0] }}-{{ item[1] |
+          lower }}"
+      no_log: true
+      tags:
+        - tags_sat_config_content

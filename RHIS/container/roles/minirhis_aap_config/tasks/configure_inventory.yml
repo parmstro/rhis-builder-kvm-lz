@@ -1,0 +1,41 @@
+---
+# tasks/configure_inventory.yml — minirhis_aap_config
+# Ensures the RHIS Builder Inventory and its SCM-backed source are present.
+
+- name: "RHIS AAP Config | Ensure inventory '{{ inv.name }}'"
+  ansible.controller.inventory:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ inv.name }}"
+    description: "{{ inv.description | default(omit) }}"
+    organization: "{{ inv.organization | default(aap_config_organization) }}"
+    state: "{{ inv.state | default('present') }}"
+  loop: "{{ aap_config_inventories }}"
+  loop_control:
+    loop_var: inv
+    label: "{{ inv.name }}"
+
+- name: "RHIS AAP Config | Ensure inventory source '{{ isrc.name }}'"
+  ansible.controller.inventory_source:
+    controller_host: "{{ aap_config_platform_host }}"
+    controller_username: "{{ aap_config_username }}"
+    controller_password: "{{ aap_config_password }}"
+    validate_certs: "{{ aap_config_validate_certs }}"
+    name: "{{ isrc.name }}"
+    description: "{{ isrc.description | default(omit) }}"
+    inventory: "{{ isrc.inventory }}"
+    source: "{{ isrc.source }}"
+    source_project: "{{ isrc.source_project | default(omit) }}"
+    source_path: "{{ isrc.source_path | default(omit) }}"
+    scm_branch: "{{ isrc.scm_branch | default(omit) }}"
+    credential: "{{ isrc.credential | default(omit) }}"
+    update_on_launch: "{{ isrc.update_on_launch | default(true) }}"
+    overwrite: "{{ isrc.overwrite | default(true) }}"
+    overwrite_vars: "{{ isrc.overwrite_vars | default(true) }}"
+    state: "{{ isrc.state | default('present') }}"
+  loop: "{{ aap_config_inventory_sources }}"
+  loop_control:
+    loop_var: isrc
+    label: "{{ isrc.name }}"

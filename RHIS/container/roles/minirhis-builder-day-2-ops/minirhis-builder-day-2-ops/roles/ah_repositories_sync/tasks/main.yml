@@ -1,0 +1,14 @@
+---
+
+# Sync the repositories in the list
+
+- name: "Sync the listed collection repositories"
+  when: collection_repositories is defined
+  ansible.builtin.include_tasks: "sync_repository.yml"
+  loop: "{{ collection_repositories }}"
+  loop_control:
+    loop_var: collection_repository
+  tags:
+    - tag_day_2_ops
+    - tag_automation_hub
+    - tag_sync_repos

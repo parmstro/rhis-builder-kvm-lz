@@ -1,0 +1,18 @@
+---
+# minirhis_hosts_sync/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly.
+#
+# Example (add block):
+#   ansible-playbook container/roles/minirhis_hosts_sync/run.yml \
+#     -e '{"rhis_hosts_entries": [{"ip":"10.168.0.1","fqdn":"satellite.example.com","shortname":"satellite"}]}'
+#
+# Example (remove block):
+#   ansible-playbook container/roles/minirhis_hosts_sync/run.yml \
+#     -e rhis_hosts_block_state=absent
+- name: RHIS /etc/hosts Synchronisation
+  hosts: installer
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - role: minirhis_hosts_sync

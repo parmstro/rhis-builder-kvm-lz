@@ -1,0 +1,30 @@
+---
+# Install the container tools on the host
+
+- name: "Ensure core container runtime packages are installed"
+  ansible.builtin.dnf:
+    name:
+      - "podman"
+      - "buildah"
+      - "skopeo"
+      - "conmon"
+      - "containers-common"
+      - "container-selinux"
+      - "containernetworking-plugins"
+      - "crun"
+      - "runc"
+    state: present
+    update_cache: true
+    skip_broken: true
+  register: aap_container_tools_install
+  failed_when: false
+
+- name: "Warn if some container runtime packages could not be installed"
+  ansible.builtin.debug:
+    msg: >-
+      AAP prereq warning: one or more container runtime packages were not
+      installed from configured repos. Continuing; installer phase will validate
+      remaining requirements. Details: {{ aap_container_tools_install.msg |
+      default('n/a') }}
+  when: aap_container_tools_install.failures is defined and
+    (aap_container_tools_install.failures | length > 0)

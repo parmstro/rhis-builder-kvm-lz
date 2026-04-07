@@ -1,0 +1,24 @@
+---
+
+# ensure the (typically non-idmclient) hosts defined exist
+
+- name: "Ensure the repo configs for convert2rhel hosts"
+  ansible.builtin.include_tasks: "ensure_repo_configuration.yml"
+  no_log: true
+  tags:
+    - tags_rhisam
+    - tags_c2r_prerequisites
+
+- name: "Ensure the cdn configuration for convert2rhel hosts"
+  ansible.builtin.include_tasks: "ensure_redhat_cdn_configuration.yml"
+  no_log: true
+  tags:
+    - tags_rhisam
+    - tags_c2r_prerequisites
+
+- name: "Ensure the convert2rhel install for convert2rhel hosts"
+  ansible.builtin.include_tasks: "ensure_convert2rhel.yml"
+  no_log: true
+  tags:
+    - tags_rhisam
+    - tags_c2r_prerequisites

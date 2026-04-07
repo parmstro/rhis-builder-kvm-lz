@@ -1,0 +1,44 @@
+---
+
+- name: "Reset debug level for temporary changes"
+  ansible.builtin.assert:
+    that:
+      - sssd_module.state == "absent"
+      - sssd_module.persistent == false
+
+ # ansible.builtin.set_fact:
+ #   sssd_module:
+ #     debug_level: 2
+
+- debug:
+    var: sssd_module
+
+- name: "Set the debug level temporarily for sssd module {{ sssd_module.name }}"
+  when:
+    - not sssd_module.persistent
+  ansible.builtin.command: "sssctl debug-level {{ sssd_module.debug_level }} --{{ sssd_module.name }} {{ sssd_module.domain | default() }}"
+  register: result
+  changed_when: result.rc == 0
+
+- name: "Set debug level persistently for sssd module {{ sssd_module.name }}"
+  when:
+    - sssd_module.persistent
+  ansible.builtin.blockinfile:
+    path: /etc/sssd/sssd.conf
+    backup: true
+    create: false
+    owner: "root"
+    group: "root"
+    mode: "0600"
+    seuser: "_default"
+    serole: "_default"
+    setype: "_default"
+    selevel: "_default"
+    state: "{{ sssd_module.state }}"
+    insertafter: "^{{ sssd_module.section }}"
+    block: |
+      debug_level = {{ sssd_module.debug_level }}
+    marker: "# {mark} ANSIBLE MANAGED BLOCK"
+    marker_begin: "BEGIN {{ sssd_module.section }}"
+    marker_end: "END {{ sssd_module.section }}"
+  notify: Restart_sssd

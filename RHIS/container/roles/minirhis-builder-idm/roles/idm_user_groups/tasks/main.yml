@@ -1,0 +1,16 @@
+---
+
+# Configure the sample and user groups
+
+- name: "Ensure the specified groups configuration"
+  when: idm_user_groups is defined and (idm_user_groups | length) > 0
+  ansible.builtin.include_tasks: "ensure_group.yml"
+  loop: "{{ idm_user_groups }}"
+  loop_control:
+    loop_var: idm_user_group
+  no_log: true
+  tags:
+    - tags_rhis_builder
+    - tags_rhis_builder_idm
+    - tags_idm_post_install
+    - tags_idm_user_groups

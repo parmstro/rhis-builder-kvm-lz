@@ -1,0 +1,50 @@
+---
+# Run a SCAP scan on a host or series of hosts based on a Query to satellite
+# Retrieve the results of the job
+
+- name: "Running SCAP based on query {{ scan.search_query }}"
+  redhat.satellite.job_invocation:
+    username: "{{ satellite_admin_username }}"
+    password: "{{ satellite_admin_password }}"
+    server_url: "{{ satellite_url }}"
+    validate_certs: "{{ satellite_validate_certs }}"
+    search_query: "{{ scan.search_query }}"
+    job_template: "Run OpenSCAP scans - Ansible Default"
+    concurrency_control: "{{ scan.concurrency_control | default(omit) }}"
+    description_format: "{{ scan.description_format | default(omit) }}"
+    execution_timeout_interval: "{{ scan.execution_timeout_interval | default(omit) }}"
+    # inputs: a scap scan has no inputs
+    randomized_ordering: "{{ scan.randomized_ordering | default(omit) }}"
+    recurrence: "{{ scan.recurrence | default(omit) }}"
+    ssh: "{{ scan.ssh | default(omit) }}"
+    scheduling: "{{ scan.scheduling | default(omit) }}"
+    targeting_type: "{{ scan.targeting_type | default(omit) }}"
+  register: result
+
+- name: "Get the job invocation info"
+  ansible.builtin.set_fact:
+    job_info: "{{ result.entity.job_invocations.0 }}"
+
+- name: "Watch for the SCAP scans to finish"
+  redhat.satellite.resource_info:
+    username: "{{ satellite_admin_username }}"
+    password: "{{ satellite_admin_password }}"
+    server_url: "{{ satellite_url }}"
+    validate_certs: "{{ satellite_validate_certs }}"
+    resource: job_invocations
+    params:
+      id: "{{ job_info.id }}"
+  register: job_status
+  until: job_status.resources.0.pending == 0
+  retries: 30 # retry X times
+  delay: 10
+
+- name: "Debug output"
+  when: debug_info
+  ansible.builtin.debug:
+    var: job_status
+
+- name: "Notify if there are failed scans"
+  ansible.builtin.fail:
+    msg: "One or more scans failed. Failed Scans: {{ job_status.resources.0.failed }}"
+  when: job_status.resources.0.failed != 0

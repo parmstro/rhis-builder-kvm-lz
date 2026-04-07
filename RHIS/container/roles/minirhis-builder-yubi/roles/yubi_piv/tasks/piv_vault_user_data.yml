@@ -1,0 +1,22 @@
+---
+
+# Copy the configuration to a shared idm vault
+- name: "Create a shared vault"
+  redhat.rhel_idm.ipavault:
+    action: "vault"
+    description: "yubi_piv_vault"
+    in: "{{ piv_current_username_vault_file }}"
+    ipaadmin_password: "{{ ipa_password }}"
+    ipaadmin_principal: "{{ ipa_principal }}"
+    name: "piv_vault_{{ piv_current_username }}"
+    owners:
+      - "{{ piv_current_username }}"
+    users:
+      - "{{ piv_current_username }}"
+    shared: true
+    state: present
+    vault_type: standard
+
+
+
+    

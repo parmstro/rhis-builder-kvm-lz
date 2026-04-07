@@ -1,0 +1,24 @@
+# FIX OSBUILD-COMPOSER
+# Update osbuild-composer on RHEL 8 to support Satellite 
+# create the /etc/osbuild-composer/repositories directory
+# copy all the default json files to the /etc/osbuild-composer/repositories directory
+# Determine the root of the content view's published content for the org and location
+https://sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE/content/dist/layered/rhel8/x86_64/ansible/2.9/os
+https://sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE/content/dist/rhel8/8/x86_64/appstream/os
+https://sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE/content/dist/rhel8/8/x86_64/baseos/os
+https://sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE/content/dist/rhel8/8/x86_64/supplementary/os
+https://sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE/content/dist/layered/rhel8/x86_64/sat-tools/6.9/os
+
+# update the osbuild repository json for the default RHEL8 template (or write new one?? template??)
+sed -i -e 's|cdn.redhat.com|sat6.parmstrong.ca/pulp/repos/Default_Organization/SOE_Production/RHEL8_SOE|' /etc/osbuild-composer/repositories/rhel-8.json
+
+# the red hat CA is also hard coded
+# move the old ca pem to a safe location
+mv /etc/rhsm/ca/redhat-uep.pem{,.rpmsave}
+# link the Satellte pem to the red hat pem location expected by osbuild-composer
+ln -s /etc/rhsm/ca/katello-server-ca.pem /etc/rhsm/ca/redhat-uep.pem
+
+# restart the composer and cockpit
+
+
+

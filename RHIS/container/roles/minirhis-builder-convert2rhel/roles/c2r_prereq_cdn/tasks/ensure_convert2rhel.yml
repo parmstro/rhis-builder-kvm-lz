@@ -1,0 +1,18 @@
+---
+
+- name: "Update the system" # noqa package-latest    we are updating
+  ansible.builtin.yum:
+    name: "*"
+    state: "latest"
+
+- name: "Ensure convert2rhel and subscription-manager package"
+  ansible.builtin.yum:
+    name:
+      - "convert2rhel"
+      - "subscription-manager"
+    state: "present"
+
+- name: "Schedule a system reboot"
+  ansible.builtin.reboot:
+    pre_reboot_delay: 65
+    post_reboot_delay: 180

@@ -1,0 +1,11 @@
+---
+
+# sssctl debug-level INT --<service> [--<service>] can set the debug-level
+# directly without a service restart, however, is not persistent
+
+
+- name: "Update the sssd configuration file debug levels"
+  ansible.builtin.include_tasks: "ensure_debug_level.yml"
+  loop: "{{ auth_debug_sssd_modules }}"
+  loop_control:
+    loop_var: sssd_module

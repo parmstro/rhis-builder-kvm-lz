@@ -1,0 +1,72 @@
+---
+# tasks/configure_compute.yml — rhis_sat_config
+# Creates Libvirt compute resource and Standard_Virtual_Machine compute profile.
+
+- name: "Apply Satellite API defaults"
+  module_defaults:
+    group/redhat.satellite.satellite:
+      username: "{{ satellite_username }}"
+      password: "{{ satellite_password }}"
+      server_url: "{{ satellite_url }}"
+      validate_certs: "{{ satellite_validate_certs }}"
+  block:
+    - name: "Ensure Libvirt compute resource is present"
+      redhat.satellite.compute_resource:
+        name: "{{ rhis_sat_config_compute_resource.name }}"
+        provider: "{{ rhis_sat_config_compute_resource.provider }}"
+        provider_params:
+          url: "{{ rhis_sat_config_libvirt_url }}"
+        organizations: "{{ rhis_sat_config_compute_resource.organizations }}"
+        locations: "{{ rhis_sat_config_compute_resource.locations }}"
+        state: present
+      no_log: true
+      tags:
+        - tags_sat_config_compute
+
+    - name: "Ensure compute profile is present"
+      redhat.satellite.compute_profile:
+        name: "{{ rhis_sat_config_compute_profile_name }}"
+        state: present
+      no_log: true
+
+- name: "Ensure compute attributes are present"
+  block:
+    - name: "Ensure compute attributes via Foreman API"
+      ansible.builtin.uri:
+        url: "{{ satellite_url }}/api/v2/compute_attributes"
+        method: POST
+        user: "{{ satellite_username | default(omit) }}"
+        password: "{{ satellite_password | default(omit) }}"
+        force_basic_auth: true
+        validate_certs: "{{ satellite_validate_certs | default(false) }}"
+        body_format: json
+        body:
+          compute_profile: "{{ rhis_sat_config_compute_profile_name }}"
+          compute_resource: "{{ rhis_sat_config_compute_resource.name }}"
+          cpus: "{{ rhis_sat_config_compute_attributes.cpus }}"
+          memory: "{{ rhis_sat_config_compute_attributes.memory }}"
+        status_code:
+          - 200
+          - 201
+          - 202
+      register: _cattr
+  rescue:
+    - name: "Fallback: Ensure compute attributes via hammer"
+      ansible.builtin.include_tasks:
+        file: "{{ playbook_dir
+          }}/container/roles/rhis_tools/tasks/hammer_api_fallback.yml"
+      vars:
+        api_path: "compute_attributes"
+        search_expr: >-
+          compute_profile="{{ rhis_sat_config_compute_profile_name }}"
+        hammer_cmd: >-
+          hammer compute-attributes create --compute-profile "{{
+          rhis_sat_config_compute_profile_name }}" --compute-resource "{{
+          rhis_sat_config_compute_resource.name }}" --compute-attributes
+          "cpus={{ rhis_sat_config_compute_attributes.cpus }}, memory={{
+          rhis_sat_config_compute_attributes.memory }}"
+
+    - name: "Map fallback result to _cattr"
+      ansible.builtin.set_fact:
+        _cattr: "{{ fallback_result }}"
+      changed_when: false
