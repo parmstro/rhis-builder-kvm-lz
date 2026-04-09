@@ -1,0 +1,112 @@
+---
+- name: Install CMDB packages
+  ansible.builtin.dnf:
+    name:
+      - python3-pip
+      - sshpass
+      - ansible-core
+      - policycoreutils-python-utils
+      - firewalld
+    state: present
+    disable_gpg_check: true
+
+- name: Install ansible-cmdb
+  ansible.builtin.pip:
+    name: ansible-cmdb
+    state: latest
+    executable: pip3
+    extra_args: --upgrade
+  failed_when: false
+
+- name: Ensure CMDB directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ minirhis_cmdb_facts_dir }}"
+    - "{{ minirhis_cmdb_web_dir }}"
+    - "/etc/ansible"
+
+- name: Deploy Satellite facts helper
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/minirhis-sat-facts.py.j2"
+    dest: "{{ minirhis_cmdb_sat_facts_script }}"
+    mode: "0755"
+
+- name: Deploy CMDB refresh script
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/minirhis-cmdb-refresh.sh.j2"
+    dest: "{{ minirhis_cmdb_refresh_script }}"
+    mode: "0755"
+
+- name: Deploy CMDB refresh service
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/minirhis-cmdb-refresh.service.j2"
+    dest: /etc/systemd/system/minirhis-cmdb-refresh.service
+    mode: "0644"
+
+- name: Deploy CMDB refresh timer
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/minirhis-cmdb-refresh.timer.j2"
+    dest: /etc/systemd/system/minirhis-cmdb-refresh.timer
+    mode: "0644"
+
+- name: Deploy CMDB HTTP service
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/minirhis-cmdb-http.service.j2"
+    dest: /etc/systemd/system/minirhis-cmdb-http.service
+    mode: "0644"
+
+- name: Reload systemd units
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Ensure firewalld is active
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  failed_when: false
+
+- name: Open CMDB port in configured zone
+  ansible.posix.firewalld:
+    zone: "{{ minirhis_cmdb_firewalld_zone }}"
+    port: "{{ minirhis_cmdb_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  failed_when: false
+
+- name: Open CMDB port in public zone fallback
+  ansible.posix.firewalld:
+    zone: public
+    port: "{{ minirhis_cmdb_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+  failed_when: false
+
+- name: Label CMDB port as http_port_t
+  ansible.builtin.shell: |
+    semanage port -a -t http_port_t -p tcp {{ minirhis_cmdb_port }} 2>/dev/null || \
+    semanage port -m -t http_port_t -p tcp {{ minirhis_cmdb_port }} 2>/dev/null || true
+  changed_when: false
+
+- name: Enable and start CMDB refresh timer
+  ansible.builtin.systemd:
+    name: minirhis-cmdb-refresh.timer
+    enabled: true
+    state: started
+
+- name: Run CMDB refresh now
+  ansible.builtin.systemd:
+    name: minirhis-cmdb-refresh.service
+    state: started
+  failed_when: false
+
+- name: Enable and start CMDB HTTP service
+  ansible.builtin.systemd:
+    name: minirhis-cmdb-http.service
+    enabled: true
+    state: started

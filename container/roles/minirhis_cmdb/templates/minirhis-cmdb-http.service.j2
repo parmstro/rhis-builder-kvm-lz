@@ -1,0 +1,14 @@
+[Unit]
+Description=MINIRHIS CMDB Dashboard HTTP Server
+After=network-online.target minirhis-cmdb-refresh.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ minirhis_cmdb_web_dir }}
+ExecStart=/usr/bin/python3 -m http.server {{ minirhis_cmdb_port }} --bind {{ minirhis_cmdb_bind_address }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

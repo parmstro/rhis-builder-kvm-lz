@@ -1,0 +1,59 @@
+---
+# enable_repo_set_item.yml
+- name: "Enable repository set item"
+  block:
+    - name: "Check whether repository set exists"
+      ansible.builtin.command: >-
+        hammer repository-set list --organization {{ satellite_organization |
+        quote }} --product {{ (item.0.product | replace('__REL__', item.1)) |
+        quote }} --search name="{{ (item.0.name_template | replace('__REL__',
+        item.1)) | regex_replace('"', '\\"') }}"
+      register: _repo_set_list
+      failed_when: false
+      changed_when: false
+
+    - name: "Resolve repository-set existence"
+      ansible.builtin.set_fact:
+        _repo_set_exists: >-
+          {{
+            (_repo_set_list.rc | default(1)) == 0
+            and ((item.0.name_template | replace('__REL__', item.1)) in (_repo_set_list.stdout | default('')))
+          ) }}
+      changed_when: false
+
+    - name: "Warn when repository set is not available to this org/subscription"
+      when: not (_repo_set_exists | default(false))
+      ansible.builtin.debug:
+        msg: >-
+          Repository set not available for {{ item.0.product |
+          replace('__REL__', item.1) }} / {{ item.0.name_template |
+          replace('__REL__', item.1) }}. This usually indicates missing
+          entitlement/content access for organization {{ satellite_organization
+          }}.
+      changed_when: false
+
+    - name: "Enable repository set via hammer CLI"
+      when: _repo_set_exists | default(false)
+      ansible.builtin.command: >-
+        hammer repository-set enable --organization {{ satellite_organization |
+        quote }} --basearch {{ rhis_sat_config_repo_arch | default('x86_64') |
+        quote }} {% if item.0.use_releasever %}--releasever {{ item.1 | quote
+        }}{% endif %} --product {{ (item.0.product | replace('__REL__', item.1))
+        | quote }} --name {{ (item.0.name_template | replace('__REL__', item.1))
+        | quote }}
+      register: _repo_set_hammer
+      changed_when: >-
+        (_repo_set_hammer.rc | default(1)) == 0 and ('Nothing to update' not in
+        (_repo_set_hammer.stdout | default('')))
+      failed_when: false
+
+    - name: "Warn when repository set could not be enabled"
+      ansible.builtin.debug:
+        msg: >-
+          Repository set enable skipped for {{ item.0.product |
+          replace('__REL__', item.1) }} / {{ item.0.name_template |
+          replace('__REL__', item.1) }}. hammer rc={{ _repo_set_hammer.rc |
+          default('n/a') }} stderr={{ _repo_set_hammer.stderr | default('') }}
+      when:
+        - _repo_set_exists | default(false)
+        - (_repo_set_hammer.rc | default(1)) != 0

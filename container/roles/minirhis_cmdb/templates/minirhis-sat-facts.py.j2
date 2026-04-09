@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Fetch all Satellite-registered hosts and write ansible-cmdb compatible fact stubs."""
+import sys
+import json
+import os
+import ssl
+import base64
+import urllib.request
+
+
+def sat_get(url, user, passwd):
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", "Basic " + base64.b64encode(f"{user}:{passwd}".encode()).decode())
+    req.add_header("Accept", "application/json")
+    with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
+        return json.loads(response.read())
+
+
+def main():
+    sat_url = os.environ.get("SAT_URL", "https://localhost")
+    user = os.environ.get("SAT_USER", "admin")
+    passwd = os.environ.get("SAT_PASS", "admin")
+    facts_dir = sys.argv[1] if len(sys.argv) > 1 else "{{ minirhis_cmdb_facts_dir }}"
+    skip = set(filter(None, os.environ.get("SKIP_HOSTS", "").split(",")))
+
+    try:
+        data = sat_get(f"{sat_url}/api/v2/hosts?per_page=1000", user, passwd)
+    except Exception as exc:
+        print(f"WARNING: Satellite API unreachable: {exc}", file=sys.stderr)
+        return
+
+    written = 0
+    for host in data.get("results", []):
+        name = host.get("name", "")
+        if not name or name in skip:
+            continue
+
+        fact_file = os.path.join(facts_dir, name)
+        sat_facts = {}
+        try:
+            fact_data = sat_get(f"{sat_url}/api/v2/hosts/{host['id']}/facts?per_page=1000", user, passwd)
+            results = fact_data.get("results", {})
+            if results:
+                sat_facts = next(iter(results.values()))
+        except Exception:
+            pass
+
+        ip = host.get("ip") or host.get("ip6") or sat_facts.get("ipaddress", "")
+        mac = host.get("mac") or sat_facts.get("macaddress", "")
+        os_full = host.get("operatingsystem_name", "") or sat_facts.get("operatingsystem", "")
+        os_name = os_full.split()[0] if os_full else "RHEL"
+        os_ver = sat_facts.get("operatingsystemrelease", (os_full.split()[-1] if " " in os_full else ""))
+        arch = host.get("architecture_name") or sat_facts.get("architecture", "x86_64")
+
+        mem_mb = 0
+        raw_mem = sat_facts.get("memorysize_mb", "") or sat_facts.get("memorytotal", "")
+        if raw_mem:
+            try:
+                mem_mb = int(float(str(raw_mem).split()[0]))
+            except Exception:
+                mem_mb = 0
+
+        fact = {
+            "ansible_facts": {
+                "ansible_hostname": name.split(".")[0],
+                "ansible_fqdn": name,
+                "ansible_nodename": name,
+                "ansible_default_ipv4": {"address": ip, "macaddress": mac},
+                "ansible_distribution": os_name,
+                "ansible_distribution_version": os_ver,
+                "ansible_architecture": arch,
+                "ansible_processor_count": int(sat_facts.get("processorcount", 1)),
+                "ansible_memtotal_mb": mem_mb,
+                "ansible_kernel": sat_facts.get("kernelversion", sat_facts.get("kernel", "")),
+                "satellite_hostgroup": host.get("hostgroup_name", ""),
+                "satellite_environment": host.get("environment_name", ""),
+                "satellite_organization": host.get("organization_name", ""),
+                "satellite_location": host.get("location_name", ""),
+                "satellite_managed": True,
+                "satellite_registered": host.get("subscription_status_label", "unknown"),
+            },
+            "changed": False,
+            "_source": "satellite-api",
+        }
+
+        with open(fact_file, "w", encoding="utf-8") as handle:
+            json.dump(fact, handle, indent=2)
+
+        written += 1
+
+    print(f"Satellite stub facts written: {written}")
+
+
+if __name__ == "__main__":
+    main()

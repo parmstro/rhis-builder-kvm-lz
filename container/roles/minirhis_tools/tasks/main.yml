@@ -1,0 +1,14 @@
+---
+# Consolidated entrypoint for rhis_tools role.
+# This role intentionally preserves the original include file
+# `tasks/hammer_api_fallback.yml` to maintain compatibility with callers
+# that reference it directly via `include_tasks`.
+
+- name: "Run fallback include when api_path is provided"
+  ansible.builtin.include_tasks: hammer_api_fallback.yml
+  when: api_path is defined and search_expr is defined and hammer_cmd is defined
+  tags:
+    - always
+  vars:
+    # provide the wrapper path variable for included task if caller hasn't
+    fallback_wrapper_path: "{{ fallback_wrapper_path | default(fallback_wrapper_path) }}"

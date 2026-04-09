@@ -1,0 +1,8 @@
+[Unit]
+Description=Refresh MINIRHIS ansible-cmdb dashboard data
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ minirhis_cmdb_refresh_script }}

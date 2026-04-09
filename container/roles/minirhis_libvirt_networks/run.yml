@@ -1,0 +1,12 @@
+---
+# minirhis_libvirt_networks/run.yml
+# Entry-point playbook — run via MiniRHIS.sh run_local_role() or directly:
+#   ansible-playbook container/roles/minirhis_libvirt_networks/run.yml \
+#     -e internal_gw=10.168.0.1 -e netmask=255.255.0.0
+- name: RHIS libvirt Network Configuration
+  hosts: installer
+  connection: local
+  gather_facts: false
+  become: false
+  roles:
+    - role: minirhis_libvirt_networks

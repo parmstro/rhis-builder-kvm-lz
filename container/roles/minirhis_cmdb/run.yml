@@ -1,0 +1,12 @@
+---
+- name: Configure MINIRHIS CMDB on Satellite
+  hosts: scenario_satellite
+  gather_facts: false
+  become: true
+  vars_files:
+    - defaults/main.yml
+  tasks:
+    - name: Include CMDB role tasks
+      ansible.builtin.include_tasks: tasks/main.yml
+      tags:
+        - always

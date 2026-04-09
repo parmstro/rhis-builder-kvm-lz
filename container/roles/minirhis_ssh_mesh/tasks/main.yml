@@ -1,0 +1,267 @@
+---
+# minirhis_ssh_mesh/tasks/main.yml
+# Bootstrap/finalize SSH trust mesh across RHIS nodes and installer host.
+
+- name: Resolve SSH mesh host groups and mode
+  ansible.builtin.set_fact:
+    rhis_installer_hosts_resolved: "{{ groups['installer'] | default([]) }}"
+    rhis_node_hosts_resolved: >-
+      {{
+        (groups['rhis_nodes'] | default([]))
+        if (groups['rhis_nodes'] | default([]) | length) > 0
+        else (
+          (groups['scenario_satellite'] | default([]))
+          + (groups['aap'] | default([]))
+          + (groups['idm'] | default([]))
+        )
+        | unique
+      }}
+    rhis_installer_host_resolved: "{{ (groups['installer'] | default([]) | first) | default('localhost') }}"
+    rhis_is_installer_host: >-
+      {{
+        inventory_hostname == 'localhost'
+        or inventory_hostname == ((groups['installer'] | default([]) | first) | default('localhost'))
+      }}
+    rhis_is_node_host: "{{ inventory_hostname in ((groups['rhis_nodes'] |
+      default([])) if (groups['rhis_nodes'] | default([]) | length) > 0 else
+      ((groups['scenario_satellite'] | default([])) + (groups['aap'] |
+      default([])) + (groups['idm'] | default([])))) }}"
+  changed_when: false
+
+- name: Validate SSH mesh mode
+  ansible.builtin.assert:
+    that:
+      - rhis_mesh_mode in ['bootstrap', 'finalize']
+    fail_msg: "Unsupported rhis_mesh_mode='{{ rhis_mesh_mode }}'. Use 'bootstrap' or
+      'finalize'."
+
+# Bootstrap mode
+
+- name: "Bootstrap | Ensure installer keypair exists"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_installer_host
+  block:
+    - name: Ensure installer SSH key directory exists
+      ansible.builtin.file:
+        path: "{{ rhis_installer_key_path | dirname }}"
+        state: directory
+        mode: "0700"
+
+    - name: Generate dedicated installer keypair (if absent)
+      community.crypto.openssh_keypair:
+        path: "{{ rhis_installer_key_path }}"
+        type: rsa
+        size: 4096
+        comment: "minirhis-installer-{{ inventory_hostname }}"
+        state: present
+
+    - name: Read installer public key
+      ansible.builtin.slurp:
+        src: "{{ rhis_installer_key_path }}.pub"
+      register: installer_pub_raw
+
+    - name: Set installer public key fact
+      ansible.builtin.set_fact:
+        rhis_installer_pub_key: "{{ installer_pub_raw.content | b64decode | trim }}"
+        cacheable: false
+
+- name: "Bootstrap | Generate {{ rhis_mesh_user }} SSH keypair on RHIS nodes"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+  block:
+    - name: Ensure .ssh directory for {{ rhis_mesh_user }}
+      ansible.builtin.file:
+        path: "~{{ rhis_mesh_user }}/.ssh"
+        state: directory
+        mode: "0700"
+        owner: "{{ rhis_mesh_user }}"
+        group: "{{ rhis_mesh_user }}"
+      become: true
+
+    - name: Generate SSH keypair for {{ rhis_mesh_user }}
+      community.crypto.openssh_keypair:
+        path: "~{{ rhis_mesh_user }}/.ssh/id_rsa"
+        type: rsa
+        size: 4096
+        owner: "{{ rhis_mesh_user }}"
+        group: "{{ rhis_mesh_user }}"
+        comment: "rhis-mesh-{{ inventory_hostname }}"
+        state: present
+      become: true
+      become_user: "{{ rhis_mesh_user }}"
+
+    - name: Fetch {{ rhis_mesh_user }} public key
+      ansible.builtin.slurp:
+        src: "~{{ rhis_mesh_user }}/.ssh/id_rsa.pub"
+      register: node_pub_raw
+      become: true
+
+    - name: Set per-node public key fact
+      ansible.builtin.set_fact:
+        rhis_node_pub_key: "{{ node_pub_raw.content | b64decode | trim }}"
+        cacheable: false
+
+- name: "Bootstrap | Aggregate node public keys"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+  ansible.builtin.set_fact:
+    rhis_all_node_pub_keys: >-
+      {{
+        rhis_node_hosts_resolved
+        | map('extract', hostvars, 'rhis_node_pub_key')
+        | select('defined')
+        | list
+      }}
+    cacheable: false
+
+- name: "Bootstrap | Authorize full node mesh keys on each RHIS node"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+  ansible.posix.authorized_key:
+    user: "{{ rhis_mesh_user }}"
+    key: "{{ item }}"
+    state: present
+    exclusive: false
+  loop: "{{ rhis_all_node_pub_keys | default([]) }}"
+  become: true
+
+- name: "Bootstrap | Discover users on managed node for temporary installer key"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+    - hostvars[rhis_installer_host_resolved].rhis_installer_pub_key is defined
+  ansible.builtin.command: "id -u {{ item }}"
+  loop: "{{ rhis_installer_remote_users | unique }}"
+  register: rhis_remote_user_checks
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: "Bootstrap | Temporarily authorize installer key on managed nodes"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+    - hostvars[rhis_installer_host_resolved].rhis_installer_pub_key is defined
+    - item.rc == 0
+  ansible.posix.authorized_key:
+    user: "{{ item.item }}"
+    key: "{{ hostvars[rhis_installer_host_resolved].rhis_installer_pub_key }}"
+    state: present
+    exclusive: false
+  loop: "{{ rhis_remote_user_checks.results | default([]) }}"
+  become: true
+
+- name: "Bootstrap | Discover installer-host users that should trust installer key"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_installer_host
+    - rhis_installer_pub_key is defined
+  ansible.builtin.command: "id -u {{ item }}"
+  loop: "{{ rhis_installer_host_users | unique }}"
+  register: rhis_installer_host_user_checks
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: "Bootstrap | Authorize installer key for admin and installer user on
+    installer host"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_installer_host
+    - rhis_installer_pub_key is defined
+    - item.rc == 0
+  ansible.posix.authorized_key:
+    user: "{{ item.item }}"
+    key: "{{ rhis_installer_pub_key }}"
+    state: present
+    exclusive: false
+  loop: "{{ rhis_installer_host_user_checks.results | default([]) }}"
+  become: true
+
+- name: "Bootstrap | Authorize RHIS node keys on installer host"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_installer_host
+    - item is defined
+    - item | length > 0
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user_id }}"
+    key: "{{ item }}"
+    state: present
+    exclusive: false
+  loop: >-
+    {{
+      rhis_node_hosts_resolved
+      | map('extract', hostvars, 'rhis_node_pub_key')
+      | select('defined')
+      | list
+    }}
+
+- name: "Bootstrap | Deploy SSH client config on RHIS nodes"
+  when:
+    - rhis_mesh_mode == 'bootstrap'
+    - rhis_is_node_host
+  ansible.builtin.copy:
+    dest: "~{{ rhis_mesh_user }}/.ssh/config"
+    owner: "{{ rhis_mesh_user }}"
+    group: "{{ rhis_mesh_user }}"
+    mode: "0600"
+    content: |
+      Host *
+          StrictHostKeyChecking {{ rhis_ssh_strict_checking }}
+          UserKnownHostsFile /dev/null
+          LogLevel ERROR
+          IdentityFile ~/.ssh/id_rsa
+  become: true
+  become_user: "{{ rhis_mesh_user }}"
+
+# Finalize mode
+
+- name: "Finalize | Read installer public key on installer host"
+  when:
+    - rhis_mesh_mode == 'finalize'
+    - rhis_is_installer_host
+  ansible.builtin.slurp:
+    src: "{{ rhis_installer_key_path }}.pub"
+  register: installer_pub_finalize_raw
+  failed_when: false
+
+- name: "Finalize | Set installer public key fact"
+  when:
+    - rhis_mesh_mode == 'finalize'
+    - rhis_is_installer_host
+    - installer_pub_finalize_raw is defined
+    - installer_pub_finalize_raw.content is defined
+  ansible.builtin.set_fact:
+    rhis_installer_pub_key: "{{ installer_pub_finalize_raw.content | b64decode | trim }}"
+    cacheable: false
+
+- name: "Finalize | Discover users on managed node for installer-key cleanup"
+  when:
+    - rhis_mesh_mode == 'finalize'
+    - rhis_is_node_host
+    - hostvars[rhis_installer_host_resolved].rhis_installer_pub_key is defined
+  ansible.builtin.command: "id -u {{ item }}"
+  loop: "{{ rhis_installer_remote_users | unique }}"
+  register: rhis_remote_user_finalize_checks
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: "Finalize | Remove temporary installer key from managed nodes"
+  when:
+    - rhis_mesh_mode == 'finalize'
+    - rhis_is_node_host
+    - hostvars[rhis_installer_host_resolved].rhis_installer_pub_key is defined
+    - item.rc == 0
+  ansible.posix.authorized_key:
+    user: "{{ item.item }}"
+    key: "{{ hostvars[rhis_installer_host_resolved].rhis_installer_pub_key }}"
+    state: absent
+    exclusive: false
+  loop: "{{ rhis_remote_user_finalize_checks.results | default([]) }}"
+  become: true

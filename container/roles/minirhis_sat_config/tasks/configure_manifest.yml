@@ -1,0 +1,57 @@
+---
+# tasks/configure_manifest.yml — rhis_sat_config
+# Upload subscription manifest when a staged local manifest is available.
+
+- name: "Manifest upload workflow"
+  tags:
+    - tags_sat_config_manifest
+  block:
+    - name: "Set local manifest candidate paths"
+      ansible.builtin.set_fact:
+        _manifest_candidates:
+          - "{{ sat_manifest_path | default('') }}"
+          - "{{ lookup('env', 'HOME') }}/.ansible/conf/manifest.zip"
+          - "/minirhis/vars/vault/manifest.zip"
+      changed_when: false
+
+    - name: "Find first existing local manifest file"
+      ansible.builtin.set_fact:
+        rhis_sat_manifest_local_path: "{{ item }}"
+      loop: "{{ _manifest_candidates }}"
+      when:
+        - (rhis_sat_manifest_local_path | default('') | length) == 0
+        - item | length > 0
+        - lookup('ansible.builtin.fileglob', item, errors='ignore') | length > 0
+      changed_when: false
+
+    - name: "Skip manifest upload when no staged manifest was found"
+      ansible.builtin.debug:
+        msg: "No staged manifest found on controller; skipping Satellite manifest
+          upload."
+      when: (rhis_sat_manifest_local_path | default('') | length) == 0
+
+    - name: "Copy staged manifest to Satellite"
+      ansible.builtin.copy:
+        src: "{{ rhis_sat_manifest_local_path }}"
+        dest: /root/minirhis-manifest.zip
+        mode: "0600"
+      when: (rhis_sat_manifest_local_path | default('') | length) > 0
+
+    - name: "Upload manifest into Satellite"
+      ansible.builtin.command: >-
+        hammer subscription upload --organization {{ satellite_organization |
+        quote }} --file /root/minirhis-manifest.zip
+      register: _manifest_upload
+      failed_when: false
+      changed_when: >-
+        (_manifest_upload.rc | default(1)) == 0 and ('uploaded' in
+        ((_manifest_upload.stdout | default('')) | lower))
+      when: (rhis_sat_manifest_local_path | default('') | length) > 0
+
+    - name: "Report manifest upload result"
+      ansible.builtin.debug:
+        msg: >-
+          Manifest upload rc={{ _manifest_upload.rc | default('n/a') }}
+          stdout={{ _manifest_upload.stdout | default('') }} stderr={{
+          _manifest_upload.stderr | default('') }}
+      when: (rhis_sat_manifest_local_path | default('') | length) > 0

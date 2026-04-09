@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic MINIRHIS ansible-cmdb refresh timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=minirhis-cmdb-refresh.service
+
+[Install]
+WantedBy=timers.target
