@@ -1,8 +1,8 @@
 ---
 # Kickstart Preparation Variables
 local_workspace: "/tmp/kickstart"
-local_iso_path: "/path/to/rhel-9.4-x86_64-dvd.iso"
-iso_filename: "rhel-9.4-x86_64-dvd.iso"
+local_iso_path: "/path/to/rhel-9.4-x86_64-dvd.iso" # DO NOT include the iso_filename in the path to local iso
+iso_filename: "rhel-9.7-x86_64-dvd.iso"
 img_filename: "oemdrv.img"
 
 # HTTP Server Configuration

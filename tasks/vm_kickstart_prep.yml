@@ -1,0 +1,66 @@
+---
+# VM Kickstart Preparation Tasks
+# Generates per-VM kickstart configs and FAT32 USB images
+
+- name: Ensure kickstart directory exists in filesystem pool
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  become: true
+
+- name: Generate VM kickstart configuration from template
+  ansible.builtin.template:
+    src: ../template/vm_ks.cfg.j2
+    dest: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.cfg"
+    mode: '0644'
+    owner: root
+    group: root
+  become: true
+
+- name: Check if kickstart USB image already exists
+  ansible.builtin.stat:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img"
+  register: ks_img_stat
+  become: true
+
+- name: Create empty 10MB image file for VM kickstart
+  ansible.builtin.command: >
+    dd if=/dev/zero
+    of={{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+    bs=1M count=10
+  when: not ks_img_stat.stat.exists
+  changed_when: true
+  become: true
+
+- name: Format the image file as FAT32 with label OEMDRV
+  ansible.builtin.command: >
+    mkfs.vfat -F 32 -n OEMDRV
+    {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+  when: not ks_img_stat.stat.exists
+  changed_when: true
+  become: true
+
+- name: Copy ks.cfg into the FAT32 image using mcopy
+  ansible.builtin.command: >
+    mcopy -i {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+    {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.cfg
+    ::/ks.cfg
+  when: not ks_img_stat.stat.exists
+  changed_when: true
+  become: true
+
+- name: Set correct ownership and SELinux context for kickstart files
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+    setype: virt_image_t
+  loop:
+    - "{{ vm.vmname }}-ks.cfg"
+    - "{{ vm.vmname }}-ks.img"
+  become: true
+...

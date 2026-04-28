@@ -1,0 +1,150 @@
+# VM Kickstart for {{ vm.vmname }}
+# Automated installation via CD-ROM boot with USB OEMDRV kickstart
+{% if "provisioner" in vm.vmname %}
+# - rhis-builder-provisioner (optional)
+{% elif "idm" in vm.vmname %}
+# - rhis-builder-idm
+{% elif "satellite" in vm.vmname %}
+# - rhis-builder-satellite
+{% elif "kvm" in vm.vmname or "infra" in vm.vmname %}
+# - rhis-builder-kvm
+{% endif %}
+
+lang en_US.UTF-8
+selinux --enforcing
+keyboard us
+skipx
+
+network --device={{ vm.network.mac }} \
+        --hostname {{ vm.vmname }} \
+        --noipv6 \
+        --bootproto static \
+        --ip={{ vm.network.ipv4_address }} \
+        --netmask={{ vm.network.ipv4_netmask }} \
+        --gateway={{ vm.network.ipv4_gateway }} \
+        --mtu=1500 \
+        --nameserver={{ vm.network.name_server1 }},{{ vm.network.name_server2 }}
+
+rootpw --iscrypted {{ vm.root_enc_pass }}
+firewall --service=ssh
+authselect --useshadow --passalgo=sha512 --kickstart
+
+# We are going to use an ansible role to assign time services, so just set the time zone
+# --ntpservers is deprecated in RHEL9 
+timezone --utc UTC
+
+services --disabled gpm,sendmail,cups,pcmcia,isdn,rawdevices,hpoj,bluetooth,openibd,avahi-daemon,avahi-dnsconfd,hidd,hplip,pcscd
+
+{% if vm.grub_enc_pass is defined and vm.grub_enc_pass != "" %}
+bootloader --append="nofb quiet splash=quiet" --iscrypted --password={{ vm.grub_enc_pass }}
+{% else %}
+bootloader --append="nofb quiet splash=quiet"
+{% endif %}
+
+# VM disk configuration - use first disk based on bus type
+zerombr
+clearpart --initlabel --drives={{ 'vda' if vm.disks[0].disk.bus == 'virtio' else 'sda' }}
+
+part /boot --fstype ext4 --size=1024 --ondisk={{ 'vda' if vm.disks[0].disk.bus == 'virtio' else 'sda' }}
+part /boot/efi --fstype="efi" --size=600 --ondisk={{ 'vda' if vm.disks[0].disk.bus == 'virtio' else 'sda' }}
+part pv.01 --size=1 --grow --ondisk={{ 'vda' if vm.disks[0].disk.bus == 'virtio' else 'sda' }}
+
+# Compliance-focused LVM layout (CPGPC, DISA-STIG, CIS, PCI-DSS)
+volgroup vg_root pv.01
+logvol swap --recommended --vgname=vg_root --name=lv_swap
+logvol /  --vgname=vg_root --size={{ vm.fs.lv_root_mb }} --name=lv_root --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /home  --vgname=vg_root --size={{ vm.fs.lv_home_mb }} --name=lv_home --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /tmp  --vgname=vg_root --size={{ vm.fs.lv_tmp_mb }} --name=lv_tmp --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /var/tmp  --vgname=vg_root --size={{ vm.fs.lv_var_tmp_mb }} --name=lv_var_tmp --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /var/log --vgname=vg_root --size={{ vm.fs.lv_var_log_mb }} --name=lv_var_log --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /var/log/audit --vgname=vg_root --size={{ vm.fs.lv_var_log_audit_mb }} --name=lv_var_log_audit --fstype={{ vm.fs.filesystem | default('xfs') }}
+logvol /var --vgname=vg_root --size={{ vm.fs.lv_var_mb }} --grow --name=lv_var --fstype={{ vm.fs.filesystem | default('xfs') }}
+
+text
+reboot
+
+%packages
+bash-completion
+man-pages
+net-tools
+bind-utils
+tmux
+{% if vm.fs.filesystem is not defined or vm.fs.filesystem == "xfs" %}
+xfsdump
+{% endif %}
+yum-utils
+zip
+yum
+chrony
+-ntp
+@Core
+{% if "provisioner" in vm.network.hostname %}
+@container-management
+ansible-core
+{% elif "kvm" in vm.network.hostname or "infra" in vm.network.hostname %}
+@container-management
+ansible-core
+@virtualization
+@virtualization-tools
+{% endif %}
+%end
+
+%post
+exec < /dev/tty3 > /dev/tty3
+chvt 3
+(
+logger "Starting anaconda {{ vm.network.hostname }}.{{ vm.network.domain }} postinstall"
+
+# Network configuration - find interface by MAC address
+real=`grep -l {{ vm.network.mac }} /sys/class/net/*/{bonding_slave/perm_hwaddr,address} 2>/dev/null | awk -F '/' '// {print $5}' | head -1`
+
+nmcli con add type ethernet con-name "$real" ifname "$real" \
+    ipv4.method manual \
+    ipv4.addresses {{ vm.network.ipv4_address }}/{{ vm.network.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
+    ipv4.gateway {{ vm.network.ipv4_gateway }} \
+    ipv4.dns "{{ vm.network.name_server1 }} {{ vm.network.name_server2 }}" \
+    ipv4.dns-search "{{ vm.network.domain }}" \
+    802-3-ethernet.cloned-mac-address "{{ vm.network.mac }}" \
+    802-3-ethernet.mtu 1500 \
+    connection.zone public \
+    connection.autoconnect yes \
+    ipv4.ignore-auto-dns no \
+    ipv4.ignore-auto-routes no \
+    ipv4.never-default no
+
+# Ensure reliable DNS for initial connectivity
+nmcli conn mod $real ipv4.dns 8.8.8.8,8.8.4.4 && sudo nmcli conn up $real
+
+# Provisioner user for Ansible automation
+useradd -G wheel {{ vm.username }} -p '{{ vm.user_enc_pass }}'
+mkdir -p -m 0700 ~{{ vm.username }}/.ssh
+cat >> ~{{ vm.username }}/.ssh/authorized_keys <<EOF
+{{ vm.ssh_pub_key }}
+EOF
+chown -R {{ vm.username }}:{{ vm.username }} ~{{ vm.username }}/.ssh
+chmod -R go= ~{{ vm.username }}/.ssh
+
+cat >> /etc/sudoers.d/{{ vm.username }} <<EOF
+{{ user_sudoer_policy }}
+EOF
+
+cat >> /etc/hosts <<EOF
+{{ vm.network.hostname }}.{{ vm.network.domain }}    {{ vm.network.ipv4_address }}
+EOF
+
+# Red Hat subscription registration
+subscription-manager register --org={{ vm.redhat.org }} --activationkey={{ vm.redhat.activation_key }}
+
+# System time synchronization
+systemctl enable --now chronyd
+/usr/bin/chronyc -a makestep
+/usr/sbin/hwclock --systohc
+
+# Update system packages
+dnf -y update
+
+chvt 1
+) 2>&1 | tee /root/install.post.log
+
+sync
+%end

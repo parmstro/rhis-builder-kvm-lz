@@ -80,6 +80,24 @@
         - storage
 
     # =====================================================================
+    # --- ISO Distribution for VM Deployment ---
+    # =====================================================================
+
+    - name: Ensure required packages for VM kickstart are installed
+      ansible.builtin.dnf:
+        name:
+          - dosfstools
+          - mtools
+          - qemu-img
+        state: present
+
+    - name: Distribute RHEL ISO to hypervisors
+      ansible.builtin.include_tasks: ../tasks/distribute_iso.yml
+      tags:
+        - iso
+        - vm_prep
+
+    # =====================================================================
     # --- Verification ---
     # =====================================================================
 
