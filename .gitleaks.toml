@@ -1,0 +1,120 @@
+# Gitleaks Configuration for rhis-builder-kvm-lz
+# Uses rule-specific allowlisting to ignore known test/placeholder values
+
+title = "gitleaks config for Ansible KVM deployment"
+
+# ==========================================
+# Global Path Exclusions
+# ==========================================
+[allowlist]
+  description = "Global path-based exclusions"
+
+  # Ignore example and test files
+  paths = [
+    # Example certificates and keys (if any)
+    '''\/examples?\/.*\.pem$''',
+    '''\/test\/.*\.(key|pem|crt)$''',
+
+    # Documentation and example files
+    '''README\.md$''',
+    '''CLAUDE\.md$''',
+  ]
+
+# ==========================================
+# Rule-Specific Allowlists
+# ==========================================
+
+# Generic Password Detection Rule
+[[rules]]
+  id = "generic-password"
+  description = "Detects common password variables"
+  regex = '''(?i)(password|passwd|pwd)\s*[:=]\s*['"]?[^\s'"]+['"]?'''
+  tags = ["password", "credentials"]
+
+  [rules.allowlist]
+    description = "Allow encrypted password hashes and variable references"
+    regexes = [
+      # SHA-512 encrypted password hashes (these are safe)
+      '''\$6\$rounds=\d+''',
+
+      # Ansible variable references (these are templates, not actual secrets)
+      '''\{\{\s*\w+\s*\}\}''',
+
+      # Placeholder values in comments and documentation
+      '''YourPassword''',
+      '''YourSaltHere''',
+      '''YourHashHere''',
+
+      # Test/example placeholder patterns
+      '''TEST_PASS''',
+      '''EXAMPLE_PASSWORD''',
+      '''changeme''',
+    ]
+
+# Generic API Key Detection
+[[rules]]
+  id = "generic-api-key"
+  description = "Detects API keys and tokens"
+  regex = '''(?i)(api[_-]?key|apikey|access[_-]?token)\s*[:=]\s*['"]?[a-zA-Z0-9_\-]{20,}['"]?'''
+  tags = ["api-key", "token"]
+
+# SSH Private Key Detection
+[[rules]]
+  id = "ssh-private-key"
+  description = "Detects SSH private keys"
+  regex = '''-----BEGIN\s+(RSA|DSA|EC|OPENSSH)\s+PRIVATE\s+KEY-----'''
+  tags = ["ssh", "private-key"]
+
+  [rules.allowlist]
+    description = "Allow example private keys in test directories"
+    paths = [
+      '''\/examples?\/''',
+      '''\/tests?\/''',
+    ]
+
+# AWS Access Key Detection
+[[rules]]
+  id = "aws-access-key"
+  description = "Detects AWS Access Keys"
+  regex = '''AKIA[0-9A-Z]{16}'''
+  tags = ["aws", "credentials"]
+
+# GCP Service Account Keys
+[[rules]]
+  id = "gcp-service-account"
+  description = "Detects GCP service account keys"
+  regex = '''"type":\s*"service_account"'''
+  tags = ["gcp", "credentials"]
+
+# Generic Secret Detection
+[[rules]]
+  id = "generic-secret"
+  description = "Detects common secret variables"
+  regex = '''(?i)(secret|token|credential)\s*[:=]\s*['"]?[^\s'"]{8,}['"]?'''
+  tags = ["secret", "credentials"]
+
+  [rules.allowlist]
+    description = "Allow variable references and placeholder values"
+    regexes = [
+      # Ansible variable references
+      '''\{\{\s*\w+\s*\}\}''',
+
+      # Placeholder patterns
+      '''YourSecretHere''',
+      '''REPLACE_ME''',
+      '''changeme''',
+    ]
+
+# Red Hat Subscription Manager
+[[rules]]
+  id = "rhsm-activation-key"
+  description = "Detects Red Hat activation keys"
+  regex = '''(?i)activation[_-]?key\s*[:=]\s*['"]?[a-zA-Z0-9_\-]+['"]?'''
+  tags = ["rhsm", "credentials"]
+
+  [rules.allowlist]
+    description = "Allow variable references"
+    regexes = [
+      # Ansible variable references
+      '''\{\{\s*\w+\s*\}\}''',
+    ]

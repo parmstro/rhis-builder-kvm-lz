@@ -1,0 +1,50 @@
+---
+- name: Boot Server to Virtual Media and Wait for OS Installation
+  hosts: infra_servers
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # --- Redfish API Boot Override ---
+    
+    - name: Configure First Boot Device to Virtual CD (Boot Once)
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/redfish/v1/Systems/System.Embedded.1"
+        method: PATCH
+        user: "{{ idrac_user }}"
+        password: "{{ idrac_password }}"
+        validate_certs: false
+        force_basic_auth: true
+        body_format: json
+        body:
+          Boot:
+            # "Cd" targets the Virtual CD/Network File 1 endpoint
+            BootSourceOverrideTarget: "Cd"
+            # Ensures the server reverts to its default local disk boot order afterwards
+            BootSourceOverrideEnabled: "Once"
+      delegate_to: localhost
+
+    # --- Dell OpenManage Collection Power Task ---
+
+    - name: Initiate cold reboot (Power Cycle) via iDRAC
+      dellemc.openmanage.idrac_server_power:
+        idrac_ip: "{{ ansible_host }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        validate_certs: false
+        power_state: "PowerCycle"
+      delegate_to: localhost
+
+    # --- OS Reachability Monitor ---
+
+    - name: Wait for the newly installed OS to become reachable via SSH
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        state: started
+        # Wait 5 minutes (300 seconds) before polling to allow the install environment to load
+        delay: 300
+        # Allow up to 60 minutes (3600 seconds) for the kickstart installation to finish
+        timeout: 3600
+      delegate_to: localhost
+...

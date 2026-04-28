@@ -1,0 +1,23 @@
+---
+- name: "Template libvirt XML definition: {{ vm.vmname }}"
+  ansible.builtin.template:
+    src: ../template/vm_definition.xml.j2
+    dest: "/tmp/{{ vm.vmname }}.xml"
+    mode: '0644'
+  vars:
+    vmname: "{{ vm.vmname }}"
+    vcpu: "{{ vm.vcpu }}"
+    memory: "{{ vm.memory }}"
+    disks: "{{ vm.disks }}"
+
+- name: "Define VM from XML: {{ vm.vmname }}"
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('file', '/tmp/' + vm.vmname + '.xml') }}"
+
+- name: "Start VM: {{ vm.vmname }}"
+  community.libvirt.virt:
+    name: "{{ vm.vmname }}"
+    state: running
+    autostart: true
+...
