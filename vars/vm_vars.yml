@@ -1,0 +1,55 @@
+---
+vms:
+  - vmname: idm1.domain.test
+    target_host: infra1
+    vcpu: 1
+    memory: 8192
+    disks:
+      - name: osvolumedisk1
+        disk:
+          capacity: 100
+          bus: virtio
+          volume_mode: filesystem
+      - name: datavolumedisk1
+        disk:
+          capacity: 500
+          bus: scsi
+          volume_mode: block
+
+  - vmname: web1.domain.test
+    target_host: infra2
+    vcpu: 2
+    memory: 4096
+    disks:
+      - name: web1_os1
+        disk:
+          capacity: 50
+          bus: virtio
+          volume_mode: filesystem
+      - name: web1_data1
+        disk:
+          capacity: 200
+          bus: scsi
+          volume_mode: block
+
+  - vmname: db1.domain.test
+    target_host: infra3
+    vcpu: 4
+    memory: 16384
+    disks:
+      - name: db1_os1
+        disk:
+          capacity: 100
+          bus: virtio
+          volume_mode: filesystem
+      - name: db1_data1
+        disk:
+          capacity: 1000
+          bus: scsi
+          volume_mode: block
+      - name: db1_data2
+        disk:
+          capacity: 1000
+          bus: scsi
+          volume_mode: block
+...

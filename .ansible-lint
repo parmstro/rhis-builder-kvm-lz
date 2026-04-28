@@ -1,0 +1,9 @@
+---
+# Ansible-lint configuration
+
+# Skip no-handler rule globally
+# Rationale: RAID setup tasks that run when changed are sequential setup steps,
+# not repetitive tasks suitable for handlers (tasks/setup_raid.yml lines 45, 52, 57)
+skip_list:
+  - no-handler
+...

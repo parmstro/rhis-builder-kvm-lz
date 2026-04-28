@@ -1,0 +1,51 @@
+---
+host:
+  hostname: infra3
+  domain: domain.test
+  # Primary NIC MAC address - configured during kickstart
+  # Libvirt bridge will be created on second NIC with active link
+  mac: "aa:bb:cc:dd:ee:03"
+  ipv4_address: "10.10.10.53"
+  ipv4_netmask: "255.255.255.0"
+  ipv4_gateway: "10.10.10.1"
+  name_server1: "8.8.8.8"
+  name_server2: "8.8.4.4"
+
+  # Disk Configuration - Using disk-by-id for stable device naming
+  # Note: Kickstart will auto-detect Dell BOSS device if present, these values are fallback
+  boot_disk: "disk/by-id/wwn-0x5000c500a1b2c3d6"
+  root_disk: "disk/by-id/wwn-0x5000c500a1b2c3d6"
+
+  # Additional NVMe disks for RAID 10 array
+  additional_disks:
+    - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R403234"
+    - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R403235"
+    - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R403236"
+    - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R403237"
+
+  # LVM Volume Sizing (MB)
+  boot_mb: 1024
+  boot_efi_mb: 600
+  lv_root_mb: 20480
+  lv_home_mb: 10240
+  lv_tmp_mb: 10240
+  lv_var_tmp_mb: 10240
+  lv_var_log_mb: 20480
+  lv_var_log_audit_mb: 10240
+  lv_var_mb: 20480
+
+  filesystem: "xfs"
+
+  # Authentication Configuration
+  root_enc_pass: "$6$rounds=656000$YourSaltHere$YourHashHere"
+  grub_enc_pass: ""
+
+  username: "ansiblerunner"
+  user_enc_pass: "$6$rounds=656000$YourSaltHere$YourHashHere"
+  ssh_pub_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC... ansible@provisioner"
+  user_sudoer_policy: "ansiblerunner ALL=(ALL) NOPASSWD: ALL"
+
+  # Red Hat Subscription Manager
+  org: "12345678"
+  activation_key: "rhel9-kvm-hosts"
+...

@@ -1,0 +1,46 @@
+---
+# Kickstart Preparation Variables
+local_workspace: "/tmp/kickstart"
+local_iso_path: "/path/to/rhel-9.4-x86_64-dvd.iso"
+iso_filename: "rhel-9.4-x86_64-dvd.iso"
+img_filename: "oemdrv.img"
+
+# HTTP Server Configuration
+remote_http_host: "provisioner.domain.test"
+remote_http_user: "ansible"
+remote_http_docroot: "/var/www/html/provision"
+http_server_base_url: "http://provisioner.domain.test/provision"
+
+# RAID Configuration
+raid_level: 10
+raid_name: "md0"
+raid_chunk_size: 512  # KB
+raid_metadata_version: "1.2"
+
+# LVM Configuration
+lvm_vg_filesystem_name: "vg_nvme_fs"
+lvm_vg_filesystem_size: "1T"
+lvm_vg_block_name: "vg_nvme_block"
+lvm_vg_block_size: "1T"
+
+# Libvirt Storage Pools
+libvirt_pool_filesystem_name: "nvme_pool_fs"
+libvirt_pool_filesystem_path: "/mnt/{{ raid_name }}/libvirt/filesystem"
+libvirt_pool_filesystem_type: "dir"
+
+libvirt_pool_block_name: "nvme_pool_block"
+libvirt_pool_block_type: "logical"
+
+# VM definitions file path
+vm_vars_file: "{{ playbook_dir }}/../vars/vm_vars.yml"
+
+# Libvirt Network Configuration
+# Primary NIC configured during kickstart via MAC address
+# Bridge will be created on second NIC with active link
+libvirt_bridge_name: "br1"
+libvirt_network_name: "libvirt_net1"  # Increment allows for additional networks
+libvirt_network_mode: "bridge"
+
+# Network Configuration
+network_mtu: 1500
+...

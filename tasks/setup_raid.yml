@@ -1,0 +1,352 @@
+---
+# RAID 10 Setup Tasks
+# This task file configures mdadm RAID 10 on additional NVMe disks
+
+- name: Ensure mdadm is installed
+  ansible.builtin.dnf:
+    name:
+      - mdadm
+      - lvm2
+    state: present
+
+- name: Check if RAID array already exists
+  ansible.builtin.command: mdadm --detail /dev/{{ raid_name }}
+  register: raid_check
+  failed_when: false
+  changed_when: false
+
+- name: Stop existing RAID array if present
+  ansible.builtin.command: mdadm --stop /dev/{{ raid_name }}
+  when:
+    - raid_check.rc == 0
+    - force_raid_recreate | default(false)
+  changed_when: true
+
+- name: Zero superblock on RAID devices
+  ansible.builtin.command: mdadm --zero-superblock /dev/{{ item }}
+  loop: "{{ host.additional_disks }}"
+  when:
+    - raid_check.rc != 0 or force_raid_recreate | default(false)
+  failed_when: false
+  changed_when: true
+
+- name: Create RAID 10 array
+  ansible.builtin.command: >
+    mdadm --create /dev/{{ raid_name }}
+    --level={{ raid_level }}
+    --raid-devices={{ host.additional_disks | length }}
+    --chunk={{ raid_chunk_size }}
+    --metadata={{ raid_metadata_version }}
+    --assume-clean
+    {% for disk in host.additional_disks %}/dev/{{ disk }}{% if not loop.last %} {% endif %}{% endfor %}
+  when: raid_check.rc != 0
+  register: raid_create
+  changed_when: true
+
+- name: Wait for RAID array to be available
+  ansible.builtin.wait_for:
+    path: /dev/{{ raid_name }}
+    state: present
+    timeout: 60
+  when: raid_create.changed
+
+- name: Save RAID configuration to mdadm.conf
+  ansible.builtin.shell: mdadm --detail --scan >> /etc/mdadm.conf
+  when: raid_create.changed
+  changed_when: true
+
+- name: Update initramfs with RAID configuration
+  ansible.builtin.command: dracut -f
+  when: raid_create.changed
+  changed_when: true
+
+# =====================================================================
+# --- Load VM Definitions and Detect Storage Requirements ---
+# =====================================================================
+
+- name: Load VM definitions to detect required storage types
+  ansible.builtin.include_vars:
+    file: "{{ vm_vars_file }}"
+    name: vm_definitions
+
+- name: Detect if filesystem volume_mode is used by any VM
+  ansible.builtin.set_fact:
+    uses_filesystem_mode: >-
+      {{ vm_definitions.vms
+      | selectattr('disks', 'defined')
+      | map(attribute='disks')
+      | flatten
+      | selectattr('disk.volume_mode', 'defined')
+      | selectattr('disk.volume_mode', 'equalto', 'filesystem')
+      | list
+      | length > 0 }}
+
+- name: Detect if block volume_mode is used by any VM
+  ansible.builtin.set_fact:
+    uses_block_mode: >-
+      {{ vm_definitions.vms
+      | selectattr('disks', 'defined')
+      | map(attribute='disks')
+      | flatten
+      | selectattr('disk.volume_mode', 'defined')
+      | selectattr('disk.volume_mode', 'equalto', 'block')
+      | list
+      | length > 0 }}
+
+- name: Display detected storage requirements
+  ansible.builtin.debug:
+    msg:
+      - "Filesystem volume_mode required: {{ uses_filesystem_mode }}"
+      - "Block volume_mode required: {{ uses_block_mode }}"
+
+# =====================================================================
+# --- Partition RAID Array for Separate Volume Groups ---
+# =====================================================================
+
+- name: Check if RAID partitions exist
+  ansible.builtin.command: parted -s /dev/{{ raid_name }} print
+  register: partition_check
+  failed_when: false
+  changed_when: false
+
+- name: Create GPT partition table on RAID array
+  ansible.builtin.command: parted -s /dev/{{ raid_name }} mklabel gpt
+  when:
+    - "'Partition Table: gpt' not in partition_check.stdout"
+    - uses_filesystem_mode | bool or uses_block_mode | bool
+  changed_when: true
+
+- name: Create partition for filesystem volume group
+  community.general.parted:
+    device: /dev/{{ raid_name }}
+    number: 1
+    state: present
+    part_start: 0%
+    part_end: "{{ lvm_vg_filesystem_size }}"
+    flags: [lvm]
+  when: uses_filesystem_mode | bool
+  register: fs_partition_created
+
+- name: Calculate block partition start
+  ansible.builtin.set_fact:
+    block_part_start: "{{ lvm_vg_filesystem_size if uses_filesystem_mode else '0%' }}"
+
+- name: Calculate block partition end
+  ansible.builtin.set_fact:
+    block_part_end: >-
+      {{ (lvm_vg_filesystem_size | regex_replace('T$', '') | int
+      + lvm_vg_block_size | regex_replace('T$', '') | int) | string + 'T'
+      if uses_filesystem_mode
+      else lvm_vg_block_size }}
+
+- name: Create partition for block volume group
+  community.general.parted:
+    device: /dev/{{ raid_name }}
+    number: "{{ 2 if uses_filesystem_mode else 1 }}"
+    state: present
+    part_start: "{{ block_part_start }}"
+    part_end: "{{ block_part_end }}"
+    flags: [lvm]
+  when: uses_block_mode | bool
+  register: block_partition_created
+
+- name: Build list of partitions to wait for
+  ansible.builtin.set_fact:
+    partitions_to_wait: "{{ [] + (['1'] if uses_filesystem_mode or uses_block_mode else []) + (['2'] if uses_filesystem_mode and uses_block_mode else []) }}"
+
+- name: Wait for partition devices to be available
+  ansible.builtin.wait_for:
+    path: "/dev/{{ raid_name }}p{{ item }}"
+    state: present
+    timeout: 30
+  loop: "{{ partitions_to_wait }}"
+  when: partitions_to_wait | length > 0
+
+# =====================================================================
+# --- Filesystem Storage Pool (for volume_mode: filesystem) ---
+# =====================================================================
+
+- name: Check if filesystem PV exists
+  ansible.builtin.command: pvdisplay /dev/{{ raid_name }}p1
+  register: fs_pv_check
+  failed_when: false
+  changed_when: false
+  when: uses_filesystem_mode | bool
+
+- name: Create LVM physical volume for filesystem storage
+  ansible.builtin.command: pvcreate /dev/{{ raid_name }}p1
+  when:
+    - uses_filesystem_mode | bool
+    - fs_pv_check.rc != 0
+  changed_when: true
+
+- name: Create volume group for filesystem storage
+  community.general.lvg:
+    vg: "{{ lvm_vg_filesystem_name }}"
+    pvs: /dev/{{ raid_name }}p1
+    state: present
+  when: uses_filesystem_mode | bool
+
+- name: Create logical volume for filesystem pool
+  community.general.lvol:
+    vg: "{{ lvm_vg_filesystem_name }}"
+    lv: lv_filesystem_pool
+    size: 100%FREE
+  register: lv_filesystem_created
+  when: uses_filesystem_mode | bool
+
+- name: Format filesystem logical volume with XFS
+  community.general.filesystem:
+    fstype: xfs
+    dev: /dev/{{ lvm_vg_filesystem_name }}/lv_filesystem_pool
+    opts: "-L filesystem_pool"
+  when:
+    - uses_filesystem_mode | bool
+    - lv_filesystem_created.changed
+
+- name: Create mount point for filesystem pool
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}"
+    state: directory
+    mode: '0711'
+    owner: root
+    group: root
+  when: uses_filesystem_mode | bool
+
+- name: Mount filesystem pool
+  ansible.posix.mount:
+    path: "{{ libvirt_pool_filesystem_path }}"
+    src: /dev/{{ lvm_vg_filesystem_name }}/lv_filesystem_pool
+    fstype: xfs
+    opts: defaults,noatime
+    state: mounted
+  when: uses_filesystem_mode | bool
+
+- name: Set SELinux context for filesystem storage pool
+  community.general.sefcontext:
+    target: "{{ libvirt_pool_filesystem_path }}(/.*)?"
+    setype: virt_image_t
+    state: present
+  when: uses_filesystem_mode | bool
+
+- name: Apply SELinux context to filesystem pool
+  ansible.builtin.command: restorecon -Rv {{ libvirt_pool_filesystem_path }}
+  changed_when: true
+  when: uses_filesystem_mode | bool
+
+- name: Check if filesystem storage pool exists
+  community.libvirt.virt_pool:
+    command: info
+    name: "{{ libvirt_pool_filesystem_name }}"
+  register: pool_fs_info
+  failed_when: false
+  when: uses_filesystem_mode | bool
+
+- name: Define libvirt filesystem storage pool
+  community.libvirt.virt_pool:
+    command: define
+    name: "{{ libvirt_pool_filesystem_name }}"
+    xml: |
+      <pool type='{{ libvirt_pool_filesystem_type }}'>
+        <name>{{ libvirt_pool_filesystem_name }}</name>
+        <target>
+          <path>{{ libvirt_pool_filesystem_path }}</path>
+          <permissions>
+            <mode>0711</mode>
+            <owner>0</owner>
+            <group>0</group>
+          </permissions>
+        </target>
+      </pool>
+  when:
+    - uses_filesystem_mode | bool
+    - pool_fs_info.failed | default(false)
+
+- name: Build filesystem storage pool
+  community.libvirt.virt_pool:
+    command: build
+    name: "{{ libvirt_pool_filesystem_name }}"
+  when:
+    - uses_filesystem_mode | bool
+    - pool_fs_info.failed | default(false)
+
+- name: Start and autostart filesystem storage pool
+  community.libvirt.virt_pool:
+    name: "{{ libvirt_pool_filesystem_name }}"
+    state: active
+    autostart: true
+  when: uses_filesystem_mode | bool
+
+# =====================================================================
+# --- Block Storage Pool (for volume_mode: block) ---
+# =====================================================================
+
+- name: Check if block PV exists
+  ansible.builtin.command: pvdisplay /dev/{{ raid_name }}p{{ 2 if uses_filesystem_mode else 1 }}
+  register: block_pv_check
+  failed_when: false
+  changed_when: false
+  when: uses_block_mode | bool
+
+- name: Create LVM physical volume for block storage
+  ansible.builtin.command: pvcreate /dev/{{ raid_name }}p{{ 2 if uses_filesystem_mode else 1 }}
+  when:
+    - uses_block_mode | bool
+    - block_pv_check.rc != 0
+  changed_when: true
+
+- name: Create volume group for block storage
+  community.general.lvg:
+    vg: "{{ lvm_vg_block_name }}"
+    pvs: /dev/{{ raid_name }}p{{ 2 if uses_filesystem_mode else 1 }}
+    state: present
+  when: uses_block_mode | bool
+
+- name: Check if block storage pool exists
+  community.libvirt.virt_pool:
+    command: info
+    name: "{{ libvirt_pool_block_name }}"
+  register: pool_block_info
+  failed_when: false
+  when: uses_block_mode | bool
+
+- name: Define libvirt block storage pool
+  community.libvirt.virt_pool:
+    command: define
+    name: "{{ libvirt_pool_block_name }}"
+    xml: |
+      <pool type='{{ libvirt_pool_block_type }}'>
+        <name>{{ libvirt_pool_block_name }}</name>
+        <source>
+          <name>{{ lvm_vg_block_name }}</name>
+          <format type='lvm2'/>
+        </source>
+        <target>
+          <path>/dev/{{ lvm_vg_block_name }}</path>
+        </target>
+      </pool>
+  when:
+    - uses_block_mode | bool
+    - pool_block_info.failed | default(false)
+
+- name: Build block storage pool
+  community.libvirt.virt_pool:
+    command: build
+    name: "{{ libvirt_pool_block_name }}"
+  when:
+    - uses_block_mode | bool
+    - pool_block_info.failed | default(false)
+
+- name: Start and autostart block storage pool
+  community.libvirt.virt_pool:
+    name: "{{ libvirt_pool_block_name }}"
+    state: active
+    autostart: true
+  when: uses_block_mode | bool
+
+- name: Enable and start mdmonitor service
+  ansible.builtin.systemd:
+    name: mdmonitor
+    enabled: true
+    state: started
+...

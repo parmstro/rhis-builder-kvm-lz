@@ -1,0 +1,7 @@
+---
+collections:
+  - name: dellemc.openmanage
+  - name: community.libvirt
+  - name: community.general
+  - name: ansible.posix
+...

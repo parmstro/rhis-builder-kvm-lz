@@ -1,0 +1,35 @@
+<domain type='kvm'>
+  <name>{{ vmname }}</name>
+  <memory unit='MiB'>{{ memory }}</memory>
+  <vcpu placement='static'>{{ vcpu }}</vcpu>
+  
+  <iothreads>1</iothreads> <os>
+    <type arch='x86_64' machine='pc'>hvm</type>
+    <boot dev='hd'/>
+  </os>
+  <devices>
+    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+
+    <controller type='scsi' index='0' model='virtio-scsi'> <driver queues='{{ vcpu }}' iothread='1'/> </controller>
+
+    {% set letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] %}
+    {% for item in disks %}
+    {% set target_prefix = 'vd' if item.disk.bus == 'virtio' else 'sd' %}
+    {% set target_dev = target_prefix + letters[loop.index0] %}
+
+    <disk type='{{ 'block' if item.disk.volume_mode == 'block' else 'file' }}' device='disk'> <driver name='qemu' type='raw' cache='none' io='native' discard='unmap'/> {% if item.disk.volume_mode == 'block' %}
+      <source dev='/dev/vg_nvme/{{ item.name }}'/> {% else %}
+      <source file='/var/lib/libvirt/images/{{ item.name }}.img'/>
+      {% endif %}
+      
+      <target dev='{{ target_dev }}' bus='{{ item.disk.bus }}'/> {% if item.disk.bus == 'scsi' %}
+      <address type='drive' controller='0' bus='0' target='0' unit='{{ loop.index0 }}'/> {% endif %}
+    </disk>
+    {% endfor %}
+
+    <interface type='network'>
+      <source network='{{ libvirt_network_name | default("libvirt_net1") }}'/>
+      <model type='virtio'/>
+    </interface>
+  </devices>
+</domain>

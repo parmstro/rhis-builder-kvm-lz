@@ -1,0 +1,194 @@
+---
+- name: Configure KVM Host Infrastructure
+  hosts: infra_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display host information
+      ansible.builtin.debug:
+        msg: "Configuring {{ host.hostname }}.{{ host.domain }} ({{ ansible_host }})"
+
+    # =====================================================================
+    # --- Auto-detect NVMe Devices (if not defined in host_vars) ---
+    # =====================================================================
+
+    - name: Detect Dell DC NVMe SSD devices
+      ansible.builtin.shell: |
+        set -o pipefail
+        find /dev/disk/by-id -name "*Dell_DC_NVMe*" -printf '%P\n' | \
+        grep -v '_1$' | grep -v 'part' | sort
+      register: detected_nvme_devices
+      changed_when: false
+      failed_when: false
+
+    - name: Set additional_disks from auto-detection if not defined
+      ansible.builtin.set_fact:
+        host: "{{ host | combine({'additional_disks': detected_nvme_devices.stdout_lines | map('regex_replace', '^', 'disk/by-id/') | list}, recursive=true) }}"
+      when:
+        - host.additional_disks is not defined
+        - detected_nvme_devices.rc == 0
+        - detected_nvme_devices.stdout_lines | length >= 4
+
+    - name: Display disk source
+      ansible.builtin.debug:
+        msg: >-
+          Disk source: {{ 'Auto-detected Dell DC NVMe'
+          if (host.additional_disks is defined and detected_nvme_devices.rc == 0
+          and detected_nvme_devices.stdout_lines | length >= 4
+          and host_original_additional_disks is not defined)
+          else 'Configured from host_vars' }}
+      vars:
+        host_original_additional_disks: "{{ lookup('vars', 'host', default={}).get('additional_disks', None) }}"
+
+    - name: Verify additional disks are defined
+      ansible.builtin.assert:
+        that:
+          - host.additional_disks is defined
+          - host.additional_disks | length >= 4
+        fail_msg: "RAID 10 requires at least 4 disks. Found {{ host.additional_disks | default([]) | length }} disks."
+        success_msg: "Found {{ host.additional_disks | length }} disks for RAID 10 array."
+
+    - name: Display RAID configuration
+      ansible.builtin.debug:
+        msg:
+          - "RAID Level: {{ raid_level }}"
+          - "RAID Name: {{ raid_name }}"
+          - "Number of devices: {{ host.additional_disks | length }}"
+          - "Devices:"
+          - "{{ host.additional_disks }}"
+
+    # =====================================================================
+    # --- RAID Configuration ---
+    # =====================================================================
+
+    - name: Configure mdadm RAID 10 array
+      ansible.builtin.include_tasks: ../tasks/setup_raid.yml
+      tags:
+        - raid
+        - storage
+
+    # =====================================================================
+    # --- Libvirt Infrastructure Configuration ---
+    # =====================================================================
+
+    - name: Configure libvirt infrastructure
+      ansible.builtin.include_tasks: ../tasks/setup_libvirt.yml
+      tags:
+        - libvirt
+        - network
+        - storage
+
+    # =====================================================================
+    # --- Verification ---
+    # =====================================================================
+
+    - name: Verify RAID array status
+      ansible.builtin.command: mdadm --detail /dev/{{ raid_name }}
+      register: raid_status
+      changed_when: false
+
+    - name: Display RAID status
+      ansible.builtin.debug:
+        var: raid_status.stdout_lines
+
+    - name: Verify RAID partitions
+      ansible.builtin.command: parted -s /dev/{{ raid_name }} print
+      register: partition_status
+      changed_when: false
+
+    - name: Display partition status
+      ansible.builtin.debug:
+        var: partition_status.stdout_lines
+
+    - name: Verify LVM volume groups
+      ansible.builtin.command: vgdisplay
+      register: vg_status
+      changed_when: false
+
+    - name: Display VG status
+      ansible.builtin.debug:
+        var: vg_status.stdout_lines
+
+    - name: Load VM definitions for verification
+      ansible.builtin.include_vars:
+        file: "{{ vm_vars_file }}"
+        name: vm_definitions_verify
+
+    - name: Detect filesystem mode usage for verification
+      ansible.builtin.set_fact:
+        verify_uses_filesystem_mode: >-
+          {{ vm_definitions_verify.vms
+          | selectattr('disks', 'defined')
+          | map(attribute='disks')
+          | flatten
+          | selectattr('disk.volume_mode', 'defined')
+          | selectattr('disk.volume_mode', 'equalto', 'filesystem')
+          | list
+          | length > 0 }}
+
+    - name: Detect block mode usage for verification
+      ansible.builtin.set_fact:
+        verify_uses_block_mode: >-
+          {{ vm_definitions_verify.vms
+          | selectattr('disks', 'defined')
+          | map(attribute='disks')
+          | flatten
+          | selectattr('disk.volume_mode', 'defined')
+          | selectattr('disk.volume_mode', 'equalto', 'block')
+          | list
+          | length > 0 }}
+
+    - name: Verify libvirt network status
+      community.libvirt.virt_net:
+        command: info
+        name: "{{ libvirt_network_name }}"
+      register: net_status
+
+    - name: Display libvirt network status
+      ansible.builtin.debug:
+        msg: "Network '{{ libvirt_network_name }}' is {{ net_status.state }}"
+
+    - name: Verify filesystem storage pool status
+      community.libvirt.virt_pool:
+        command: info
+        name: "{{ libvirt_pool_filesystem_name }}"
+      register: pool_fs_status
+      when: verify_uses_filesystem_mode | bool
+
+    - name: Display filesystem storage pool status
+      ansible.builtin.debug:
+        msg: "Storage pool '{{ libvirt_pool_filesystem_name }}' (dir) is {{ pool_fs_status.state }}"
+      when: verify_uses_filesystem_mode | bool
+
+    - name: Verify block storage pool status
+      community.libvirt.virt_pool:
+        command: info
+        name: "{{ libvirt_pool_block_name }}"
+      register: pool_block_status
+      when: verify_uses_block_mode | bool
+
+    - name: Display block storage pool status
+      ansible.builtin.debug:
+        msg: "Storage pool '{{ libvirt_pool_block_name }}' (logical) is {{ pool_block_status.state }}"
+      when: verify_uses_block_mode | bool
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "KVM Host Configuration Complete"
+          - "=========================================="
+          - "Host: {{ host.hostname }}.{{ host.domain }}"
+          - "RAID: /dev/{{ raid_name }} (RAID {{ raid_level }})"
+          - "LVM PV: /dev/{{ raid_name }}"
+          - "Network: {{ libvirt_network_name }} (bridge: {{ libvirt_bridge_name }})"
+          - "Storage Pools:"
+          - >-
+            - Filesystem: {{ libvirt_pool_filesystem_name if verify_uses_filesystem_mode else 'Not configured' }}
+            ({{ libvirt_pool_filesystem_path if verify_uses_filesystem_mode else 'N/A' }})
+          - >-
+            - Block: {{ libvirt_pool_block_name if verify_uses_block_mode else 'Not configured' }}
+            (VG: {{ lvm_vg_block_name if verify_uses_block_mode else 'N/A' }})
+          - "=========================================="
+...

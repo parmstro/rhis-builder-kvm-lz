@@ -1,0 +1,197 @@
+# This kickstart file was created by ansible for {{ host.hostname }}.{{ host.domain }} running RedHat 9 x86_64
+# This creates the minimal install on VM/baremetal for bootstrapping:
+{% if "provisioner" in host.hostname %}
+# - rhis-builder-provisioner (optional)
+{% elif "idm" in host.hostname %}
+# - rhis-builder-idm
+{% elif "satellite" in host.hostname %}
+# - rhis-builder-satellite
+{% elif "kvm" in host.hostname or "infra" in host.hostname %}
+# - rhis-builder-kvm
+{% endif %}
+
+lang en_US.UTF-8
+selinux --enforcing
+keyboard us
+skipx
+
+network --device={{ host.mac }} --hostname {{ host.hostname }}.{{ host.domain }} --noipv6 --bootproto static --ip={{ host.ipv4_address }} --netmask={{ host.ipv4_netmask }} --gateway={{ host.ipv4_gateway }} --mtu=1500 --nameserver={{ host.name_server1 }},{{ host.name_server2 }}
+
+rootpw --iscrypted {{ host.root_enc_pass }}
+firewall --service=ssh
+authselect --useshadow --passalgo=sha512 --kickstart
+
+# We are going to use an ansible role to assign time services, so just set the time zone
+# --ntpservers is deprecated in RHEL9 
+timezone --utc UTC
+
+services --disabled gpm,sendmail,cups,pcmcia,isdn,rawdevices,hpoj,bluetooth,openibd,avahi-daemon,avahi-dnsconfd,hidd,hplip,pcscd
+
+{% if host.grub_enc_pass is defined and host.grub_enc_pass != "" %}
+bootloader --append="nofb quiet splash=quiet" --iscrypted --password={{ host.grub_enc_pass }}
+{% else %}
+bootloader --append="nofb quiet splash=quiet"
+{% endif %}
+
+# boot + efi + swap + tmp + vtmp + vlog + vlaudit + var + root + home = 191 GB
+
+# Include dynamic disk detection (Dell BOSS device if present)
+%include /tmp/bootdisk.cfg
+
+zerombr
+%include /tmp/clearpart.cfg
+
+# Include dynamic partition commands (uses BOSS device if detected)
+%include /tmp/partitions.cfg
+{% set pvs = [] %}
+{% if host.additional_disks is defined -%}
+  {% for disk in host.additional_disks -%}
+part pv.{{ disk[-3:] }} --size=1 --grow --ondisk={{ disk }}
+    {% set _ = pvs.append("pv." + disk[-3:]) -%}
+  {% endfor -%}
+{% endif %}
+
+# The following volume configuration meets most major Compliance Profiles (CPGPC, DISA-STIG, CIS, PCI-DSS, etc..)
+volgroup vg_root pv.01 {{ pvs | join(' ') }}
+logvol swap --recommended --vgname=vg_root --name=lv_swap
+logvol /  --vgname=vg_root --size={{ host.lv_root_mb }} --name=lv_root --fstype={{ host.filesystem | default('xfs') }}
+logvol /home  --vgname=vg_root --size={{ host.lv_home_mb }} --name=lv_home --fstype={{ host.filesystem | default('xfs') }}
+logvol /tmp  --vgname=vg_root --size={{ host.lv_tmp_mb }} --name=lv_tmp --fstype={{ host.filesystem | default('xfs') }}
+logvol /var/tmp  --vgname=vg_root --size={{ host.lv_var_tmp_mb }} --name=lv_var_tmp --fstype={{ host.filesystem | default('xfs') }}
+logvol /var/log --vgname=vg_root --size={{ host.lv_var_log_mb }} --name=lv_var_log --fstype={{ host.filesystem | default('xfs') }}
+logvol /var/log/audit --vgname=vg_root --size={{ host.lv_var_log_audit_mb }} --name=lv_var_log_audit --fstype={{ host.filesystem | default('xfs') }}
+logvol /var --vgname=vg_root --size={{ host.lv_var_mb }} --grow --name=lv_var --fstype={{ host.filesystem | default('xfs') }}
+
+text
+reboot
+
+%packages
+bash-completion
+man-pages
+net-tools
+bind-utils
+tmux
+{% if host.filesystem is not defined or host.filesystem == "xfs" %}
+xfsdump
+{% endif %}
+yum-utils
+zip
+yum
+chrony
+-ntp
+@Core
+{% if "provisioner" in host.hostname %}
+@container-management
+ansible-core
+{% elif "kvm" in host.hostname or "infra" in host.hostname %}
+@container-management
+ansible-core
+@virtualization
+@virtualization-tools
+{% endif %}
+%end
+
+
+%pre
+# Use DELLBOSS device for OS install if present.
+BOSS_DEV=$(find /dev -name "*Dell_BOSS*" -printf %P"\n" | \
+                egrep -v -e part -e scsi| tail -1)
+
+if [ -n "$BOSS_DEV" ]; then
+        BOOT_DISK="$BOSS_DEV"
+        ROOT_DISK="$BOSS_DEV"
+        echo "ignoredisk --only-use=\"$BOSS_DEV\"" > /tmp/bootdisk.cfg
+else
+        # Fallback to configured disks from host variables
+        BOOT_DISK="{{ host.boot_disk }}"
+        ROOT_DISK="{{ host.root_disk }}"
+        touch /tmp/bootdisk.cfg
+fi
+
+# Generate clearpart command with detected or configured disk
+cat > /tmp/clearpart.cfg <<EOF
+clearpart --initlabel --drives=$BOOT_DISK
+EOF
+
+# Generate partition commands with detected or configured disks
+cat > /tmp/partitions.cfg <<EOF
+part /boot --fstype ext4 --size={{ host.boot_mb }} --ondisk=$BOOT_DISK
+part /boot/efi --fstype="efi" --size={{ host.boot_efi_mb }} --ondisk=$BOOT_DISK
+part pv.01 --size=1 --grow --ondisk=$ROOT_DISK
+EOF
+
+%end
+
+
+%post --nochroot
+exec < /dev/tty3 > /dev/tty3
+chvt 3
+(
+
+chvt 1
+) 2>&1 | tee /mnt/sysimage/root/install.postnochroot.log
+%end
+
+
+%post
+exec < /dev/tty3 > /dev/tty3
+chvt 3
+(
+logger "Starting anaconda {{ host.hostname }}.{{ host.domain }} postinstall"
+
+
+# enp0s25 interface
+real=`grep -l {{ host.mac }} /sys/class/net/*/{bonding_slave/perm_hwaddr,address} 2>/dev/null | awk -F '/' '// {print $5}' | head -1`
+sanitized_real=`echo $real | sed s/:/_/`
+
+nmcli con add type ethernet con-name "$real" ifname "$real" \
+    ipv4.method manual \
+    ipv4.addresses {{ host.ipv4_address'/'host.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
+    ipv4.gateway {{ host.ipv4_gateway }} \
+    ipv4.dns "{{ host.name_server1 }} {{ host.name_server2 }}" \
+    ipv4.dns-search "{{ host.domain }}" \
+    802-3-ethernet.cloned-mac-address "{{ host.mac }}" \
+    802-3-ethernet.mtu 1500 \
+    connection.zone public \
+    connection.autoconnect yes \
+    ipv4.ignore-auto-dns no \
+    ipv4.ignore-auto-routes no \
+    ipv4.never-default no
+
+# make sure that we get a reliable DNS for the base install
+nmcli conn mod $real ipv4.dns 8.8.8.8,8.8.4.4 && sudo nmcli conn up $real
+
+# add our provisioner user - this user is deleted later
+
+useradd -G wheel {{ host.username }} -p '{{ host.user_enc_pass }}'
+mkdir -p -m 0700 ~{{ host.username }}/.ssh
+cat >> ~{{ host.username }}/.ssh/authorized_keys <<EOF
+{{ host.ssh_pub_key }}
+EOF
+chown -R {{ host.username }}:{{ host.username }} ~{{ host.username }}/.ssh
+chmod -R go= ~{{ host.username }}/.ssh
+
+cat >> /etc/sudoers.d/{{ host.username }} <<EOF
+{{ host.user_sudoer_policy }}
+EOF
+
+cat >> /etc/hosts <<EOF
+{{ host.hostname }}.{{ host.domain }}    {{ host.ipv4_address }}
+EOF
+
+subscription-manager register --org={{ host.org }} --activationkey={{ host.activation_key }}
+
+echo "Updating system time"
+systemctl enable --now chronyd
+/usr/bin/chronyc -a makestep
+/usr/sbin/hwclock --systohc
+
+
+dnf -y update
+  
+chvt 1
+) 2>&1 | tee /root/install.post.log
+
+sync
+
+%end
