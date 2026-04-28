@@ -83,7 +83,7 @@ vim inventory/host_vars/infra3.yml
 Place RHEL 9 ISO in the location specified in `inventory/group_vars/infra_servers.yml`:
 
 ```yaml
-local_iso_path: "/path/to/rhel-9.4-x86_64-dvd.iso"
+local_iso_path: "/path/to/rhel-9.7-x86_64-dvd.iso"
 ```
 
 Ensure HTTP server is configured and accessible:
@@ -97,7 +97,7 @@ remote_http_docroot: "/var/www/html/provision"
 ```
 /var/www/html/provision/
 ├── iso/
-│   └── rhel-9.4-x86_64-dvd.iso          # Shared across all hosts
+│   └── rhel-9.7-x86_64-dvd.iso          # Shared across all hosts
 └── image/
     ├── infra1/
     │   └── oemdrv.img                   # Host-specific kickstart image
@@ -134,7 +134,7 @@ ansible-playbook playbooks/bare_metal_deploy_install.yml
 #### Phase 2: KVM Host Configuration
 
 ```bash
-# Configure RAID, libvirt, networking
+# Configure RAID, libvirt, networking, and prepare for VM deployment
 ansible-playbook playbooks/kvm_host_configure.yml
 ```
 
@@ -152,6 +152,8 @@ ansible-playbook playbooks/kvm_host_configure.yml
 7. Detects secondary NIC and creates bridge
 8. Configures libvirt bridge-mode network
 9. Enables firewall rules and IP forwarding
+10. Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
+11. Distributes RHEL ISO to each hypervisor's filesystem pool at `/mnt/md0/libvirt/filesystem/iso/`
 
 **Run specific sections:**
 ```bash
@@ -161,6 +163,9 @@ ansible-playbook playbooks/kvm_host_configure.yml --tags raid
 # Only configure libvirt
 ansible-playbook playbooks/kvm_host_configure.yml --tags libvirt
 
+# Only distribute ISO
+ansible-playbook playbooks/kvm_host_configure.yml --tags iso
+
 # Single host only
 ansible-playbook playbooks/kvm_host_configure.yml --limit infra1
 ```
@@ -168,22 +173,61 @@ ansible-playbook playbooks/kvm_host_configure.yml --limit infra1
 #### Phase 3: VM Deployment
 
 ```bash
-# Define VMs in vars/vm_vars.yml
+# Define VMs in vars/vm_vars.yml with network configuration
 vim vars/vm_vars.yml
 
-# Deploy VMs to cluster
+# Deploy VMs to cluster with automated kickstart installation
 ansible-playbook playbooks/deploy_vm.yml
 ```
 
 **What happens:**
 1. Each hypervisor filters VMs by `target_host`
-2. Templates libvirt XML with performance tuning
-3. Defines and starts VMs
-4. Configures autostart
+2. Creates disk volumes (qemu-img for filesystem mode, LVM for block mode)
+3. Generates per-VM kickstart configuration from template
+4. Creates FAT32 USB image (10MB) with OEMDRV label containing kickstart file
+5. Stores kickstart artifacts in filesystem pool: `/mnt/md0/libvirt/filesystem/kickstart/`
+6. Templates libvirt XML with:
+   - CD-ROM device pointing to RHEL ISO
+   - USB disk device pointing to kickstart image
+   - Boot order: CD-ROM first, then HDD
+   - Performance tuning (virtio-scsi, IO threads)
+   - Network interface with specified MAC address
+7. Defines and starts VM for installation
+8. VM boots from CD-ROM, auto-detects kickstart from USB OEMDRV label
+9. Automated OS installation proceeds:
+   - Static network configuration
+   - Compliance-focused LVM partitioning
+   - Provisioner user creation
+   - Red Hat subscription registration
+   - System updates
+10. Waits for SSH availability (timeout: 60 minutes)
+11. Shuts down VM and redefines without installation media
+12. Restarts VM with autostart enabled for production use
+
+**Monitor installation progress:**
+```bash
+# Watch VM console during installation
+ssh infra1 "virsh console idm1.domain.test"
+
+# Check installation logs after completion
+ssh ansiblerunner@10.10.10.100 "cat /root/install.post.log"
+```
 
 **Deploy to specific host:**
 ```bash
 ansible-playbook playbooks/deploy_vm.yml --limit infra2
+```
+
+**Verify deployment:**
+```bash
+# Check VM status
+ssh infra1 "virsh list --all"
+
+# Verify kickstart artifacts
+ssh infra1 "ls -lh /mnt/md0/libvirt/filesystem/kickstart/"
+
+# Test SSH connectivity
+ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
 ```
 
 ## Configuration Details
@@ -260,28 +304,79 @@ Example `vars/vm_vars.yml`:
 ---
 vms:
   - vmname: idm1.domain.test
-    target_host: infra1          # Deploy to this hypervisor
+    target_host: infra1                          # Deploy to this hypervisor
     vcpu: 2
-    memory: 8192                 # MB
+    memory: 8192                                 # MB
+    network:
+      hostname: "idm1"                           # Short hostname (without domain)
+      domain: "domain.test"                      # DNS domain name
+      mac: "52:54:00:aa:bb:01"                   # Use libvirt MAC range: 52:54:00:XX:XX:XX
+      ipv4_address: "10.10.10.100"
+      ipv4_netmask: "255.255.255.0"
+      ipv4_gateway: "10.10.10.1"
+      name_server1: "8.8.8.8"
+      name_server2: "8.8.4.4"
+    root_enc_pass: "{{ encrypted_root_pass_vault }}"
+    grub_enc_pass: "{{ encrypted_grub_pass_vault }}"
+    username: "ansiblerunner"
+    user_enc_pass: "{{ encrypted_user_pass_vault }}"
+    user_sudoer_policy: "{{ user_sudoer_policy_vault }}"
+    ssh_pub_key: "{{ ssh_pub_key_vault }}"
+    fs:
+      filesystem: "xfs"
+      boot_mb: 1024
+      boot_efi_mb: 2048
+      lv_root_mb: 65536                          # 64GB for root
+      lv_home_mb: 20480                          # 20GB for /home
+      lv_tmp_mb: 6144                            # 6GB for /tmp
+      lv_var_tmp_mb: 6144                        # 6GB for /var/tmp
+      lv_var_log_mb: 6144                        # 6GB for /var/log
+      lv_var_log_audit_mb: 6144                  # 6GB for /var/log/audit
+      lv_var_mb: 1                               # Use remaining space for /var
     disks:
       - name: idm1_os
         disk:
-          capacity: 100          # GB
+          capacity: 100                          # GB
           bus: virtio
-          volume_mode: filesystem
+          volume_mode: filesystem                # Raw file on XFS
       - name: idm1_data
         disk:
           capacity: 500
-          bus: scsi              # Uses virtio-scsi with IO threads
-          volume_mode: block      # Direct block access to NVMe
+          bus: scsi                              # Uses virtio-scsi with IO threads
+          volume_mode: block                     # Direct block access to NVMe
+    redhat:
+      org: "12345678"
+      activation_key: "redhat-activation-keyname"
 ```
+
+**Network Configuration:**
+- `hostname`: Short hostname without domain suffix
+- `domain`: DNS domain name (combined with hostname for FQDN)
+- `mac`: MAC address for VM NIC (use libvirt range: `52:54:00:XX:XX:XX` to avoid conflicts)
+- `ipv4_address`: Static IP address for VM
+- `ipv4_netmask`: Network mask
+- `ipv4_gateway`: Default gateway
+- `name_server1`, `name_server2`: DNS servers
+
+**Authentication and Subscription:**
+Credentials and subscription details are defined per-VM using Ansible vault variables:
+- `root_enc_pass`: Encrypted root password (reference vault variable)
+- `grub_enc_pass`: Encrypted GRUB bootloader password (optional)
+- `username`, `user_enc_pass`, `ssh_pub_key`: Provisioner user credentials (reference vault variables)
+- `user_sudoer_policy`: Sudoer policy for provisioner user
+- `redhat.org`, `redhat.activation_key`: Red Hat subscription details
+
+Define vault variables in `inventory/group_vars/infra_servers.yml` or use Ansible Vault for sensitive data.
+
+**Filesystem Layout:**
+The `fs` section defines compliance-focused LVM partitioning with separate volumes for critical system directories. Setting `lv_var_mb: 1` allocates all remaining space to `/var`.
 
 **Disk Bus Types:**
 - `virtio`: Best for general purpose, uses virtio-blk
 - `scsi`: virtio-scsi with queue matching vCPU count, IO threads enabled
 
 **Volume Modes:**
-- `filesystem`: Uses qcow2/raw files in `nvme_pool_fs` directory-based storage pool
+- `filesystem`: Uses raw files in `nvme_pool_fs` directory-based storage pool (stored in filesystem pool)
 - `block`: Direct LVM volume access from `nvme_pool_block` logical storage pool
 
 **Storage Pool Selection:**
@@ -307,17 +402,21 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 ├── playbooks/
 │   ├── bare_metal_deploy_prep.yml       # Phase 1a: Prepare virtual media
 │   ├── bare_metal_deploy_install.yml    # Phase 1b: Boot and install OS
-│   ├── kvm_host_configure.yml           # Phase 2: Configure RAID/libvirt
-│   └── deploy_vm.yml                    # Phase 3: Deploy VMs
+│   ├── kvm_host_configure.yml           # Phase 2: Configure RAID/libvirt/ISO
+│   └── deploy_vm.yml                    # Phase 3: Deploy VMs with kickstart
 ├── tasks/
 │   ├── setup_raid.yml                   # RAID 10 configuration
 │   ├── setup_libvirt.yml                # Libvirt infrastructure
+│   ├── distribute_iso.yml               # RHEL ISO distribution
+│   ├── vm_kickstart_prep.yml            # VM kickstart generation
 │   └── vm_deploy_task.yml               # Individual VM deployment
 ├── vars/
-│   └── vm_vars.yml                      # VM definitions
+│   └── vm_vars.yml                      # VM definitions with network config
 └── template/
-    ├── ks.cfg.j2                        # Kickstart template
-    └── vm_definition.xml.j2             # Libvirt VM XML template
+    ├── ks.cfg.j2                        # Kickstart template (bare metal)
+    ├── vm_ks.cfg.j2                     # Kickstart template (VMs)
+    ├── vm_definition.xml.j2             # Libvirt VM XML (with install media)
+    └── vm_definition_clean.xml.j2       # Libvirt VM XML (post-install)
 ```
 
 ## Security Considerations
@@ -473,10 +572,17 @@ virsh net-list --all
 virsh net-info libvirt_net1
 ```
 
-**Check storage pool:**
+**Check storage pools:**
 ```bash
 virsh pool-list --all
-virsh pool-info nvme_pool
+virsh pool-info nvme_pool_fs
+virsh pool-info nvme_pool_block
+```
+
+**Check RHEL ISO is available:**
+```bash
+ssh infra1 "ls -lh /mnt/md0/libvirt/filesystem/iso/"
+ssh infra1 "file /mnt/md0/libvirt/filesystem/iso/rhel-9.4-x86_64-dvd.iso"
 ```
 
 **Validate XML template:**
@@ -489,6 +595,48 @@ ansible localhost -m template \
 # Validate with virsh
 virsh define /tmp/test.xml --validate
 ```
+
+### VM Installation Hangs or Fails
+
+**Monitor installation progress:**
+```bash
+# Connect to VM console
+ssh infra1 "virsh console idm1.domain.test"
+
+# Check VM status
+ssh infra1 "virsh list --all"
+
+# View VM boot log
+ssh infra1 "virsh dumpxml idm1.domain.test | grep -A 5 boot"
+```
+
+**Check kickstart artifacts:**
+```bash
+# Verify kickstart files exist
+ssh infra1 "ls -lh /mnt/md0/libvirt/filesystem/kickstart/"
+
+# Verify USB image contents
+ssh infra1 "mdir -i /mnt/md0/libvirt/filesystem/kickstart/idm1.domain.test-ks.img"
+
+# Check kickstart config syntax
+ssh infra1 "cat /mnt/md0/libvirt/filesystem/kickstart/idm1.domain.test-ks.cfg"
+```
+
+**Common issues:**
+- **SSH timeout**: Installation may take longer than 60 minutes on slow systems
+  - Check VM console for progress: `virsh console <vmname>`
+  - Verify network connectivity from VM
+  - Check firewall rules on hypervisor
+- **Kickstart not found**: USB OEMDRV image may not be properly attached
+  - Verify USB controller in XML: `virsh dumpxml <vmname> | grep -A 3 usb`
+  - Check USB disk device: `virsh dumpxml <vmname> | grep -A 5 'bus.*usb'`
+- **Boot from HDD instead of CD-ROM**: Boot order may be incorrect
+  - Check boot order: `virsh dumpxml <vmname> | grep boot`
+  - Should show `<boot dev='cdrom'/>` before `<boot dev='hd'/>`
+- **Network configuration fails**: MAC address conflicts or incorrect network settings
+  - Verify unique MAC addresses in `vars/vm_vars.yml`
+  - Check libvirt network: `virsh net-dumpxml libvirt_net1`
+  - Verify bridge configuration: `ip addr show br1`
 
 ## Advanced Usage
 

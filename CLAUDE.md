@@ -83,15 +83,48 @@ vms:
     target_host: <inventory_hostname>  # Which hypervisor to deploy on (e.g., infra1, infra2, infra3)
     vcpu: <count>
     memory: <MiB>
+    network:
+      hostname: "<short_hostname>"       # Short hostname (without domain)
+      domain: "<domain>"                 # DNS domain name
+      mac: "<MAC_address>"               # MAC address for VM NIC (use libvirt range: 52:54:00:XX:XX:XX)
+      ipv4_address: "<IP>"
+      ipv4_netmask: "<netmask>"
+      ipv4_gateway: "<gateway>"
+      name_server1: "<DNS1>"
+      name_server2: "<DNS2>"
+    root_enc_pass: "<encrypted_password>"           # Root account password (use ansible-vault)
+    grub_enc_pass: "<encrypted_password>"           # GRUB bootloader password (optional, use ansible-vault)
+    username: "<provisioner_username>"              # Provisioner user account name
+    user_enc_pass: "<encrypted_password>"           # Provisioner user password (use ansible-vault)
+    user_sudoer_policy: "<sudoer_policy>"           # Sudoer policy (e.g., ALL=(ALL) NOPASSWD: ALL)
+    ssh_pub_key: "<ssh_public_key>"                 # SSH public key for provisioner user
+    fs:                                             # Filesystem layout configuration
+      filesystem: "xfs"                             # Root filesystem type
+      boot_mb: 1024                                 # /boot partition size (MB)
+      boot_efi_mb: 2048                             # /boot/efi partition size (MB)
+      lv_root_mb: 65536                             # / LV size (MB)
+      lv_home_mb: 20480                             # /home LV size (MB)
+      lv_tmp_mb: 6144                               # /tmp LV size (MB)
+      lv_var_tmp_mb: 6144                           # /var/tmp LV size (MB)
+      lv_var_log_mb: 6144                           # /var/log LV size (MB)
+      lv_var_log_audit_mb: 6144                     # /var/log/audit LV size (MB)
+      lv_var_mb: 1                                  # /var LV size (1 = use remaining space)
     disks:
       - name: <disk_name>
         disk:
           capacity: <GB>
           bus: virtio|scsi
           volume_mode: filesystem|block
+    redhat:
+      org: "<organization_id>"                      # Red Hat organization ID
+      activation_key: "<activation_key_name>"       # Red Hat activation key
 ```
 
 Each VM is assigned to a specific hypervisor host via the `target_host` field. The deployment playbook filters VMs per host, allowing targeted deployment across the cluster.
+
+**Authentication and Subscription**: VM credentials and subscription details are defined per-VM in `vars/vm_vars.yml` using Ansible vault variables for sensitive data. Common credentials can be referenced from `inventory/group_vars/infra_servers.yml` using vault variable syntax (e.g., `{{ encrypted_root_pass_vault }}`).
+
+**Filesystem Layout**: The `fs` section defines compliance-focused LVM partitioning with separate volumes for system directories. Setting `lv_var_mb: 1` allocates remaining space to `/var`.
 
 ### Performance Tuning
 
@@ -120,17 +153,21 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 ├── playbooks/
 │   ├── bare_metal_deploy_prep.yml       # Phase 1: Prepare iDRAC virtual media
 │   ├── bare_metal_deploy_install.yml    # Phase 2: Boot and install OS
-│   ├── kvm_host_configure.yml           # Phase 3: Configure RAID/libvirt
-│   └── deploy_vm.yml                    # Phase 4: Deploy VMs
+│   ├── kvm_host_configure.yml           # Phase 3: Configure RAID/libvirt/ISO
+│   └── deploy_vm.yml                    # Phase 4: Deploy VMs with kickstart
 ├── tasks/
 │   ├── setup_raid.yml                   # RAID 10 configuration tasks
 │   ├── setup_libvirt.yml                # Libvirt infrastructure tasks
+│   ├── distribute_iso.yml               # RHEL ISO distribution to hypervisors
+│   ├── vm_kickstart_prep.yml            # VM kickstart config and USB image generation
 │   └── vm_deploy_task.yml               # VM deployment tasks
 ├── vars/
-│   └── vm_vars.yml                      # VM definitions
+│   └── vm_vars.yml                      # VM definitions with network config
 └── template/
-    ├── ks.cfg.j2                        # Kickstart template
-    └── vm_definition.xml.j2             # Libvirt VM XML template
+    ├── ks.cfg.j2                        # Kickstart template (bare metal)
+    ├── vm_ks.cfg.j2                     # Kickstart template (VMs)
+    ├── vm_definition.xml.j2             # Libvirt VM XML template (with install media)
+    └── vm_definition_clean.xml.j2       # Libvirt VM XML template (post-install)
 ```
 
 ## Deployment Workflow
@@ -155,16 +192,30 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
      - Block pool (if any VM uses volume_mode: block)
    - Configures libvirt bridge network
    - Creates appropriate libvirt storage pools
+   - Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
+   - Distributes RHEL ISO to each hypervisor's filesystem pool (`/mnt/md0/libvirt/filesystem/iso/`)
 
 ### Phase 3: VM Deployment
 
-1. Define VMs in `vars/vm_vars.yml` with `target_host` assignments
+1. Define VMs in `vars/vm_vars.yml` with `target_host` assignments and network configuration
 2. Validate syntax: `ansible-lint playbooks/deploy_vm.yml`
 3. Check mode test: `ansible-playbook playbooks/deploy_vm.yml --check`
 4. Deploy VMs: `ansible-playbook playbooks/deploy_vm.yml`
    - Playbook runs on all `infra_servers`
    - Each host deploys only VMs with matching `target_host`
    - Can deploy to specific host: `ansible-playbook playbooks/deploy_vm.yml --limit infra1`
+
+**Automated Kickstart Installation Workflow:**
+1. Create disk volumes (qemu-img for filesystem mode, LVM for block mode)
+2. Generate per-VM kickstart configuration from template (`vm_ks.cfg.j2`)
+3. Create FAT32 USB image with OEMDRV label containing kickstart file
+4. Define VM with CD-ROM (RHEL ISO) and USB (kickstart image) devices
+5. Start VM with boot order: CD-ROM first, then HDD
+6. VM boots from ISO and auto-detects kickstart from USB OEMDRV label
+7. Automated OS installation with static network, compliance LVM layout, and provisioner user
+8. Wait for SSH availability (timeout: 60 minutes)
+9. Shutdown VM and redefine without installation media
+10. Restart VM with autostart enabled for production use
 
 ## Additional Context
 

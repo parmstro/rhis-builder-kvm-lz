@@ -1,5 +1,45 @@
 ---
-- name: "Template libvirt XML definition: {{ vm.vmname }}"
+# =====================================================================
+# --- Volume Creation ---
+# =====================================================================
+
+- name: Create filesystem-mode disk images
+  ansible.builtin.command: >
+    qemu-img create -f raw
+    {{ libvirt_pool_filesystem_path }}/{{ item.name }}.img
+    {{ item.disk.capacity }}G
+  loop: "{{ vm.disks | selectattr('disk.volume_mode', 'equalto', 'filesystem') | list }}"
+  args:
+    creates: "{{ libvirt_pool_filesystem_path }}/{{ item.name }}.img"
+  become: true
+
+- name: Create block-mode logical volumes
+  community.general.lvol:
+    vg: "{{ lvm_vg_block_name }}"
+    lv: "{{ item.name }}"
+    size: "{{ item.disk.capacity }}g"
+  loop: "{{ vm.disks | selectattr('disk.volume_mode', 'equalto', 'block') | list }}"
+  become: true
+
+- name: Set SELinux context for filesystem-mode images
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/{{ item.name }}.img"
+    setype: virt_image_t
+  loop: "{{ vm.disks | selectattr('disk.volume_mode', 'equalto', 'filesystem') | list }}"
+  become: true
+
+# =====================================================================
+# --- Kickstart Generation ---
+# =====================================================================
+
+- name: Include VM kickstart preparation tasks
+  ansible.builtin.include_tasks: vm_kickstart_prep.yml
+
+# =====================================================================
+# --- VM Definition and Installation ---
+# =====================================================================
+
+- name: "Template libvirt XML definition for installation: {{ vm.vmname }}"
   ansible.builtin.template:
     src: ../template/vm_definition.xml.j2
     dest: "/tmp/{{ vm.vmname }}.xml"
@@ -15,9 +55,66 @@
     command: define
     xml: "{{ lookup('file', '/tmp/' + vm.vmname + '.xml') }}"
 
-- name: "Start VM: {{ vm.vmname }}"
+- name: "Start VM for kickstart installation: {{ vm.vmname }}"
+  community.libvirt.virt:
+    name: "{{ vm.vmname }}"
+    state: running
+    autostart: false
+
+# =====================================================================
+# --- Wait for Installation Completion ---
+# =====================================================================
+
+- name: "Wait for {{ vm.vmname }} to become reachable via SSH"
+  ansible.builtin.wait_for:
+    host: "{{ vm.network.ipv4_address }}"
+    port: 22
+    state: started
+    delay: 60
+    timeout: 3600
+  delegate_to: localhost
+
+# =====================================================================
+# --- Post-Install VM Cleanup ---
+# =====================================================================
+
+- name: "Shutdown {{ vm.vmname }} to detach installation media"
+  community.libvirt.virt:
+    name: "{{ vm.vmname }}"
+    state: shutdown
+
+- name: "Wait for {{ vm.vmname }} to shut down completely"
+  ansible.builtin.wait_for:
+    timeout: 60
+  delegate_to: localhost
+
+- name: "Template clean VM XML definition: {{ vm.vmname }}"
+  ansible.builtin.template:
+    src: ../template/vm_definition_clean.xml.j2
+    dest: "/tmp/{{ vm.vmname }}-clean.xml"
+    mode: '0644'
+  vars:
+    vmname: "{{ vm.vmname }}"
+    vcpu: "{{ vm.vcpu }}"
+    memory: "{{ vm.memory }}"
+    disks: "{{ vm.disks }}"
+
+- name: "Redefine VM without installation media: {{ vm.vmname }}"
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('file', '/tmp/' + vm.vmname + '-clean.xml') }}"
+
+- name: "Start VM in production mode: {{ vm.vmname }}"
   community.libvirt.virt:
     name: "{{ vm.vmname }}"
     state: running
     autostart: true
+
+- name: "Clean up temporary XML files: {{ vm.vmname }}"
+  ansible.builtin.file:
+    path: "/tmp/{{ vm.vmname }}{{ item }}.xml"
+    state: absent
+  loop:
+    - ""
+    - "-clean"
 ...

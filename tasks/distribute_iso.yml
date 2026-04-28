@@ -1,0 +1,35 @@
+---
+# ISO Distribution Tasks
+# Copies RHEL ISO from Ansible controller to hypervisor filesystem pool
+
+- name: Ensure ISO directory exists in filesystem pool
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/iso"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  become: true
+
+- name: Check if RHEL ISO already exists on hypervisor
+  ansible.builtin.stat:
+    path: "{{ libvirt_pool_filesystem_path }}/iso/{{ iso_filename }}"
+  register: iso_stat
+  become: true
+
+- name: Copy RHEL ISO from controller to hypervisor
+  ansible.builtin.copy:
+    src: "{{ local_iso_path }}"
+    dest: "{{ libvirt_pool_filesystem_path }}/iso/{{ iso_filename }}"
+    mode: '0644'
+    owner: root
+    group: root
+  when: not iso_stat.stat.exists
+  become: true
+
+- name: Set correct SELinux context for ISO file
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/iso/{{ iso_filename }}"
+    setype: virt_image_t
+  become: true
+...

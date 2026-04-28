@@ -4,21 +4,16 @@
   <vcpu placement='static'>{{ vcpu }}</vcpu>
 
   <iothreads>1</iothreads>
-
   <os>
     <type arch='x86_64' machine='pc'>hvm</type>
-    <boot dev='cdrom'/>
     <boot dev='hd'/>
   </os>
+
   <devices>
     <emulator>/usr/bin/qemu-system-x86_64</emulator>
 
     <controller type='scsi' index='0' model='virtio-scsi'>
       <driver queues='{{ vcpu }}' iothread='1'/>
-    </controller>
-
-    <controller type='usb' index='0' model='qemu-xhci'>
-      <address type='pci' domain='0x0000' bus='0x00' slot='0x05' function='0x0'/>
     </controller>
 
     {% set letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] %}
@@ -40,19 +35,6 @@
       {% endif %}
     </disk>
     {% endfor %}
-
-    <disk type='file' device='cdrom'>
-      <driver name='qemu' type='raw'/>
-      <source file='{{ libvirt_pool_filesystem_path }}/iso/{{ iso_filename }}'/>
-      <target dev='hda' bus='ide'/>
-      <readonly/>
-    </disk>
-
-    <disk type='file' device='disk'>
-      <driver name='qemu' type='raw'/>
-      <source file='{{ libvirt_pool_filesystem_path }}/kickstart/{{ vmname }}-ks.img'/>
-      <target dev='sdb' bus='usb'/>
-    </disk>
 
     <interface type='network'>
       <source network='{{ libvirt_network_name | default("libvirt_net1") }}'/>

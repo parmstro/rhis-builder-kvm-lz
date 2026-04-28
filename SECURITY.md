@@ -23,7 +23,7 @@ Encrypt sensitive values inline while keeping the rest of the file readable:
 ansible-vault encrypt_string 'your-secret-password' --name 'idrac_password'
 
 # Encrypt an activation key
-ansible-vault encrypt_string 'rhel9-kvm-hosts' --name 'activation_key'
+ansible-vault encrypt_string 'redhat-activation-keyname' --name 'activation_key'
 ```
 
 Copy the output (including the `!vault |` header) into your YAML files:

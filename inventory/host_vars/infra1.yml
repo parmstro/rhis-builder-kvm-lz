@@ -52,5 +52,5 @@ host:
 
   # Red Hat Subscription Manager
   org: "12345678"
-  activation_key: "rhel9-kvm-hosts"
+  activation_key: "redhat-activation-keyname"
 ...
