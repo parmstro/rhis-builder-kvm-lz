@@ -1,13 +1,11 @@
 ---
-- name: Prepare, Transfer, and Mount Virtual Media for Kickstart Installation
-  hosts: infra_servers
-  connection: local
+- name: Prepare Virtual Media for Kickstart Installation
+  hosts: localhost
   gather_facts: false
-  strategy: linear
 
   tasks:
     # =====================================================================
-    # --- SHARED INFRASTRUCTURE TASKS (Run Once) ---
+    # --- LOCAL WORKSPACE SETUP ---
     # =====================================================================
 
     - name: Ensure required image manipulation packages are installed locally
@@ -16,8 +14,6 @@
           - dosfstools
           - mtools
         state: present
-      delegate_to: localhost
-      run_once: true
       become: true
 
     - name: Ensure local workspace directory exists
@@ -25,105 +21,91 @@
         path: "{{ local_workspace }}"
         state: directory
         mode: '0755'
-      delegate_to: localhost
-      run_once: true
 
     # =====================================================================
-    # --- PER-HOST KICKSTART GENERATION ---
+    # --- PER-HOST KICKSTART AND IMAGE GENERATION via group_vars loop ---
     # =====================================================================
 
-    - name: Generate kickstart configuration from template
-      ansible.builtin.template:
-        src: ../template/ks.cfg.j2
-        dest: "{{ local_workspace }}/ks-{{ host.hostname }}.cfg"
-        mode: '0644'
-      delegate_to: localhost
+    - name: Kickstart and image gen per host subtasks
+      ansible.builtin.include_tasks: "../tasks/bare_metal_deploy_prep_subtasks1.yml"
+      loop: "{{ groups['infra_servers'] }}"
 
-    - name: Set per-host kickstart path
-      ansible.builtin.set_fact:
-        local_ks_path: "{{ local_workspace }}/ks-{{ host.hostname }}.cfg"
+- name: Prepare Virtual Media http_server for Kickstart Installation
+  hosts: http_servers
+  gather_facts: false
 
+  tasks:
     # =====================================================================
-    # --- SHARED INFRASTRUCTURE TASKS (Run Once) ---
+    # --- REMOTE HTTP SERVER SETUP ---
     # =====================================================================
 
-    - name: Ensure target HTTP directories exist on remote server
+    - name: Ensure target HTTP document root exists
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}"
         state: directory
         mode: '0755'
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      run_once: true
       become: true
 
-    - name: Ensure target HTTP directories exist on remote server
+    - name: Ensure target HTTP subdirectories exist
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}/{{ item.relative_path }}"
         state: "{{ item.state }}"
         mode: "{{ item.mode }}"
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      run_once: true
       become: true
       loop:
         - { relative_path: 'iso', state: 'directory', mode: '0755' }
         - { relative_path: 'image', state: 'directory', mode: '0755' }
 
-    # =====================================================================
-    # --- PER-HOST TASKS
-    # =====================================================================
-
-    - name: Ensure per-host image directory exists on remote server
+    - name: Ensure per-host image directory exists
       ansible.builtin.file:
-        path: "{{ remote_http_docroot }}/image/{{ host.hostname }}"
+        path: "{{ remote_http_docroot }}/image/{{ hostvars[item].host.hostname }}"
         state: directory
         mode: '0755'
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
       become: true
+      loop: "{{ groups['infra_servers'] }}"
 
-    - name: Create empty 10MB image file for Kickstart locally
-      ansible.builtin.command: dd if=/dev/zero of={{ local_workspace }}/{{ host.hostname }}-{{ img_filename }} bs=1M count=10
-      delegate_to: localhost
-      changed_when: true
+- name: Transfer, and Mount Virtual Media for Kickstart Installation
+  hosts: localhost
+  gather_facts: false
 
-    - name: Format the local image file as FAT32 with label OEMDRV
-      ansible.builtin.command: mkfs.vfat -F 32 -n OEMDRV {{ local_workspace }}/{{ host.hostname }}-{{ img_filename }}
-      delegate_to: localhost
-      changed_when: true
-
-    - name: Copy ks.cfg into the local FAT32 image using mcopy
-      ansible.builtin.command: mcopy -i {{ local_workspace }}/{{ host.hostname }}-{{ img_filename }} {{ local_ks_path }} ::/ks.cfg
-      delegate_to: localhost
-      changed_when: true
+  tasks:
+    # =====================================================================
+    # --- TRANSFER FILES TO REMOTE HTTP SERVER ---
+    # =====================================================================
 
     - name: Copy local ISO to remote HTTP server iso subdirectory
-      ansible.builtin.copy:
-        src: "{{ local_iso_path }}"
-        dest: "{{ remote_http_docroot }}/iso/{{ iso_filename }}"
-        mode: '0644'
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      run_once: true
-      become: true
+      ansible.posix.synchronize:
+        src: "{{ local_iso_path }}/{{ iso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ iso_filename }}"
+        rsync_opts:
+          - "--chmod=0644"
 
-    - name: Copy local OEMDRV image to remote HTTP server image subdirectory
-      ansible.builtin.copy:
-        src: "{{ local_workspace }}/{{ host.hostname }}-{{ img_filename }}"
-        dest: "{{ remote_http_docroot }}/image/{{ host.hostname }}/{{ img_filename }}"
-        mode: '0644'
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      become: true
+    - name: Copy local OEMDRV image to remote HTTP server image subdirectory for each host
+      ansible.posix.synchronize:
+        src: "{{ local_workspace }}/{{ hostvars[item].host.hostname }}-{{ img_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/image/{{ hostvars[item].host.hostname }}/{{ img_filename }}"
+        rsync_opts:
+          - "--chmod=0644"
+      loop: "{{ groups['infra_servers'] }}"
 
-    # --- SELinux Context Tasks ---
+- name: Prepare Virtual Media http_server - adjust SELinux attributes
+  hosts: http_servers
+  gather_facts: false
 
-    - name: Update SELinux fcontext for the remote HTTP document root
-      ansible.builtin.command: semanage fcontext -a -t httpd_sys_content_t "{{ remote_http_docroot }}(/.*)?"
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      run_once: true
+  tasks:
+    # =====================================================================
+    # --- SELINUX CONFIGURATION ---
+    # =====================================================================
+
+    - name: Update SELinux fcontext for the HTTP document root
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/semanage
+          - fcontext
+          - -a
+          - -t
+          - httpd_sys_content_t
+          - "{{ remote_http_docroot }}(/.*)?"
       become: true
       register: semanage_result
       # Prevent failure if the context is already defined from a previous run
@@ -133,18 +115,26 @@
       changed_when: semanage_result.rc == 0
 
     - name: Apply SELinux contexts using restorecon
-      ansible.builtin.command: restorecon -Rv {{ remote_http_docroot }}
-      delegate_to: "{{ remote_http_host }}"
-      remote_user: "{{ remote_http_user }}"
-      run_once: true
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/restorecon
+          - -Rv
+          - "{{ remote_http_docroot }}"
       become: true
       register: restorecon_result
       # Only register as "changed" if restorecon actually modified files (output is not empty)
       changed_when: restorecon_result.stdout | length > 0
 
-    # --- Dell OpenManage Collection Virtual Media Task ---
+- name: Prepare Virtual Media on iDRAC for Kickstart Installation
+  hosts: infra_servers
+  gather_facts: false
 
-    - name: Mount ISO and IMG via iDRAC Virtual Media
+  tasks:
+    # =====================================================================
+    # --- IDRAC VIRTUAL MEDIA CONFIGURATION ---
+    # =====================================================================
+
+    - name: Mount ISO and IMG via iDRAC Virtual Media for each host
       dellemc.openmanage.idrac_virtual_media:
         idrac_ip: "{{ ansible_host }}"
         idrac_user: "{{ idrac_user }}"
@@ -154,9 +144,10 @@
         virtual_media:
           - index: 1
             insert: true
+            media_type: "DVD"
             image: "{{ http_server_base_url }}/iso/{{ iso_filename }}"
           - index: 2
             insert: true
+            media_type: "USBStick"
             image: "{{ http_server_base_url }}/image/{{ host.hostname }}/{{ img_filename }}"
-      delegate_to: localhost
 ...

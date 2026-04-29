@@ -56,11 +56,17 @@ pip install -r requirements.txt
 Edit inventory files with your server details:
 
 ```bash
-# Main inventory
+# Main inventory (includes localhost, infra_servers, http_servers groups)
 vim inventory/hosts.yml
 
-# Group variables (shared settings)
+# Shared variables (all hosts)
+vim inventory/group_vars/all.yml
+
+# Group variables (KVM hypervisors)
 vim inventory/group_vars/infra_servers.yml
+
+# Localhost orchestration variables
+vim inventory/host_vars/localhost.yml
 
 # Host-specific variables
 vim inventory/host_vars/infra1.yml
@@ -69,6 +75,20 @@ vim inventory/host_vars/infra3.yml
 ```
 
 **Key configurations:**
+
+**`inventory/group_vars/all.yml` (shared across all hosts):**
+- `iso_filename`: RHEL ISO filename
+- `img_filename`: OEMDRV image filename
+- `http_server_base_url`: Base URL for HTTP installation media
+- `remote_http_docroot`: HTTP server document root path
+
+**`inventory/host_vars/localhost.yml` (localhost orchestration):**
+- `local_workspace`: Local workspace directory for kickstart generation
+- `local_iso_path`: Directory containing RHEL ISO
+- `remote_http_host`: Provisioner/HTTP server hostname
+- `remote_http_user`: SSH user for accessing HTTP server
+
+**`inventory/host_vars/infra*.yml` (per-host):**
 - iDRAC credentials
 - Network settings (IP, MAC addresses)
 - Disk paths (disk-by-id):
@@ -80,17 +100,26 @@ vim inventory/host_vars/infra3.yml
 
 ### 3. Prepare Installation Media
 
-Place RHEL 9 ISO in the location specified in `inventory/group_vars/infra_servers.yml`:
+Place RHEL 9 ISO in the directory specified in `inventory/host_vars/localhost.yml`:
 
 ```yaml
-local_iso_path: "/path/to/rhel-9.7-x86_64-dvd.iso"
+local_iso_path: "/path/to/iso-dir"  # Directory containing ISOs
 ```
 
-Ensure HTTP server is configured and accessible:
+ISO filename is configured in `inventory/group_vars/all.yml`:
+
+```yaml
+iso_filename: "rhel-9.7-x86_64-dvd.iso"
+img_filename: "oemdrv.img"
+http_server_base_url: "http://provisioner.domain.test/provision"
+remote_http_docroot: "/var/www/html/provision"
+```
+
+HTTP server configuration in `inventory/host_vars/localhost.yml`:
 
 ```yaml
 remote_http_host: "provisioner.domain.test"
-remote_http_docroot: "/var/www/html/provision"
+remote_http_user: "ansible"
 ```
 
 **HTTP server directory structure created:**
@@ -119,17 +148,42 @@ ansible-playbook playbooks/bare_metal_deploy_prep.yml
 ansible-playbook playbooks/bare_metal_deploy_install.yml
 ```
 
-**What happens:**
-1. Generates per-host kickstart files from template
-2. Creates per-host OEMDRV FAT32 images with embedded kickstart
-3. Copies ISO to HTTP server (shared: `iso/rhel-9.4-x86_64-dvd.iso`)
-4. Copies OEMDRV images to host-specific directories (`image/{{ hostname }}/oemdrv.img`)
-5. Mounts virtual media via iDRAC (ISO + host-specific OEMDRV)
-6. Configures boot override to Virtual CD
-7. Reboots servers
-8. Kickstart %pre phase detects Dell BOSS device for OS installation (if present)
-9. Dynamically generates partition commands based on detected hardware
-10. Waits for OS installation and SSH availability (up to 60 minutes)
+**What happens (bare_metal_deploy_prep.yml):**
+
+This playbook uses a localhost-based orchestration pattern with multiple plays:
+
+1. **Play 1 (localhost)**: Local workspace setup
+   - Installs required packages (dosfstools, mtools)
+   - Creates local workspace directory
+   - Loops over `groups['infra_servers']` to generate per-host artifacts:
+     - Kickstart configuration files from template
+     - 10MB FAT32 OEMDRV images with embedded kickstart
+
+2. **Play 2 (http_servers)**: Remote HTTP server directory setup
+   - Creates HTTP document root structure
+   - Creates `iso/` and `image/` subdirectories
+   - Creates per-host image directories (`image/{{ hostname }}/`)
+
+3. **Play 3 (localhost)**: Transfer files to HTTP server
+   - Uses `ansible.posix.synchronize` (rsync) to transfer:
+     - ISO to HTTP server (shared: `iso/{{ iso_filename }}`)
+     - OEMDRV images to host-specific directories (`image/{{ hostname }}/oemdrv.img`)
+
+4. **Play 4 (http_servers)**: SELinux configuration
+   - Updates SELinux fcontext for HTTP document root
+   - Applies SELinux contexts using restorecon
+
+5. **Play 5 (infra_servers)**: iDRAC virtual media mounting
+   - Loops over each infra_server to mount virtual media via iDRAC:
+     - Index 1 (DVD): ISO from HTTP server
+     - Index 2 (USBStick): Host-specific OEMDRV image from HTTP server
+
+**What happens (bare_metal_deploy_install.yml):**
+1. Configures boot override to Virtual CD
+2. Reboots servers
+3. Kickstart %pre phase detects Dell BOSS device for OS installation (if present)
+4. Dynamically generates partition commands based on detected hardware
+5. Waits for OS installation and SSH availability (up to 60 minutes)
 
 #### Phase 2: KVM Host Configuration
 
@@ -386,37 +440,40 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 
 ```
 .
-├── README.md                            # This file
-├── CLAUDE.md                            # Project documentation for Claude AI
-├── ansible.cfg                          # Ansible configuration
-├── requirements.yml                     # Ansible collection requirements
-├── requirements.txt                     # Python package requirements
+├── README.md                                # This file
+├── CLAUDE.md                                # Project documentation for Claude AI
+├── ansible.cfg                              # Ansible configuration
+├── requirements.yml                         # Ansible collection requirements
+├── requirements.txt                         # Python package requirements
 ├── inventory/
-│   ├── hosts.yml                        # Inventory definition
+│   ├── hosts.yml                            # Inventory definition
 │   ├── group_vars/
-│   │   └── infra_servers.yml            # Group variables
+│   │   ├── all.yml                          # Variables shared across all hosts
+│   │   └── infra_servers.yml                # Group variables for KVM hosts
 │   └── host_vars/
-│       ├── infra1.yml                   # Host-specific variables
+│       ├── localhost.yml                    # Localhost orchestration variables
+│       ├── infra1.yml                       # Host-specific variables
 │       ├── infra2.yml
 │       └── infra3.yml
 ├── playbooks/
-│   ├── bare_metal_deploy_prep.yml       # Phase 1a: Prepare virtual media
-│   ├── bare_metal_deploy_install.yml    # Phase 1b: Boot and install OS
-│   ├── kvm_host_configure.yml           # Phase 2: Configure RAID/libvirt/ISO
-│   └── deploy_vm.yml                    # Phase 3: Deploy VMs with kickstart
+│   ├── bare_metal_deploy_prep.yml           # Phase 1a: Prepare virtual media
+│   ├── bare_metal_deploy_install.yml        # Phase 1b: Boot and install OS
+│   ├── kvm_host_configure.yml               # Phase 2: Configure RAID/libvirt/ISO
+│   └── deploy_vm.yml                        # Phase 3: Deploy VMs with kickstart
 ├── tasks/
-│   ├── setup_raid.yml                   # RAID 10 configuration
-│   ├── setup_libvirt.yml                # Libvirt infrastructure
-│   ├── distribute_iso.yml               # RHEL ISO distribution
-│   ├── vm_kickstart_prep.yml            # VM kickstart generation
-│   └── vm_deploy_task.yml               # Individual VM deployment
+│   ├── bare_metal_deploy_prep_subtasks1.yml # Per-host kickstart/image generation
+│   ├── setup_raid.yml                       # RAID 10 configuration
+│   ├── setup_libvirt.yml                    # Libvirt infrastructure
+│   ├── distribute_iso.yml                   # RHEL ISO distribution
+│   ├── vm_kickstart_prep.yml                # VM kickstart generation
+│   └── vm_deploy_task.yml                   # Individual VM deployment
 ├── vars/
-│   └── vm_vars.yml                      # VM definitions with network config
+│   └── vm_vars.yml                          # VM definitions with network config
 └── template/
-    ├── ks.cfg.j2                        # Kickstart template (bare metal)
-    ├── vm_ks.cfg.j2                     # Kickstart template (VMs)
-    ├── vm_definition.xml.j2             # Libvirt VM XML (with install media)
-    └── vm_definition_clean.xml.j2       # Libvirt VM XML (post-install)
+    ├── ks.cfg.j2                            # Kickstart template (bare metal)
+    ├── vm_ks.cfg.j2                         # Kickstart template (VMs)
+    ├── vm_definition.xml.j2                 # Libvirt VM XML (with install media)
+    └── vm_definition_clean.xml.j2           # Libvirt VM XML (post-install)
 ```
 
 ## Security Considerations

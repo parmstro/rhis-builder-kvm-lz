@@ -138,36 +138,39 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 
 ```
 .
-├── CLAUDE.md                            # Project documentation
-├── ansible.cfg                          # Ansible configuration
-├── requirements.yml                     # Ansible collection requirements
-├── requirements.txt                     # Python package requirements
+├── CLAUDE.md                                    # Project documentation
+├── ansible.cfg                                  # Ansible configuration
+├── requirements.yml                             # Ansible collection requirements
+├── requirements.txt                             # Python package requirements
 ├── inventory/
-│   ├── hosts.yml                        # Inventory file
+│   ├── hosts.yml                                # Inventory file
 │   ├── group_vars/
-│   │   └── infra_servers.yml            # Group variables for KVM hosts
+│   │   ├── all.yml                              # Variables shared across all hosts
+│   │   └── infra_servers.yml                    # Group variables for KVM hosts
 │   └── host_vars/
-│       ├── infra1.yml                   # Host-specific variables
+│       ├── localhost.yml                        # Localhost-specific variables
+│       ├── infra1.yml                           # Host-specific variables
 │       ├── infra2.yml
 │       └── infra3.yml
 ├── playbooks/
-│   ├── bare_metal_deploy_prep.yml       # Phase 1: Prepare iDRAC virtual media
-│   ├── bare_metal_deploy_install.yml    # Phase 2: Boot and install OS
-│   ├── kvm_host_configure.yml           # Phase 3: Configure RAID/libvirt/ISO
-│   └── deploy_vm.yml                    # Phase 4: Deploy VMs with kickstart
+│   ├── bare_metal_deploy_prep.yml               # Phase 1: Prepare iDRAC virtual media
+│   ├── bare_metal_deploy_install.yml            # Phase 2: Boot and install OS
+│   ├── kvm_host_configure.yml                   # Phase 3: Configure RAID/libvirt/ISO
+│   └── deploy_vm.yml                            # Phase 4: Deploy VMs with kickstart
 ├── tasks/
-│   ├── setup_raid.yml                   # RAID 10 configuration tasks
-│   ├── setup_libvirt.yml                # Libvirt infrastructure tasks
-│   ├── distribute_iso.yml               # RHEL ISO distribution to hypervisors
-│   ├── vm_kickstart_prep.yml            # VM kickstart config and USB image generation
-│   └── vm_deploy_task.yml               # VM deployment tasks
+│   ├── bare_metal_deploy_prep_subtasks1.yml     # Per-host kickstart/image generation
+│   ├── setup_raid.yml                           # RAID 10 configuration tasks
+│   ├── setup_libvirt.yml                        # Libvirt infrastructure tasks
+│   ├── distribute_iso.yml                       # RHEL ISO distribution to hypervisors
+│   ├── vm_kickstart_prep.yml                    # VM kickstart config and USB image generation
+│   └── vm_deploy_task.yml                       # VM deployment tasks
 ├── vars/
-│   └── vm_vars.yml                      # VM definitions with network config
+│   └── vm_vars.yml                              # VM definitions with network config
 └── template/
-    ├── ks.cfg.j2                        # Kickstart template (bare metal)
-    ├── vm_ks.cfg.j2                     # Kickstart template (VMs)
-    ├── vm_definition.xml.j2             # Libvirt VM XML template (with install media)
-    └── vm_definition_clean.xml.j2       # Libvirt VM XML template (post-install)
+    ├── ks.cfg.j2                                # Kickstart template (bare metal)
+    ├── vm_ks.cfg.j2                             # Kickstart template (VMs)
+    ├── vm_definition.xml.j2                     # Libvirt VM XML template (with install media)
+    └── vm_definition_clean.xml.j2               # Libvirt VM XML template (post-install)
 ```
 
 ## Deployment Workflow
@@ -175,9 +178,22 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 ### Phase 1: Bare Metal Provisioning (Dell iDRAC)
 
 1. Update `inventory/host_vars/*.yml` with host-specific configuration
-2. Update `inventory/group_vars/infra_servers.yml` with shared settings
+2. Update shared variables:
+   - `inventory/group_vars/all.yml`: Shared across all hosts
+     - `iso_filename`: RHEL ISO filename (e.g., `rhel-9.7-x86_64-dvd.iso`)
+     - `img_filename`: OEMDRV image filename (e.g., `oemdrv.img`)
+     - `http_server_base_url`: Base URL for HTTP server (e.g., `http://provisioner.domain.test/provision`)
+     - `remote_http_docroot`: HTTP server document root path (e.g., `/var/www/html/provision`)
+   - `inventory/host_vars/localhost.yml`: Localhost orchestration variables
+     - `local_workspace`: Local workspace directory (e.g., `/tmp/kickstart`)
+     - `local_iso_path`: Directory containing RHEL ISO (e.g., `/home/user/iso`)
+     - `remote_http_host`: Provisioner server hostname for hosting installation media
+     - `remote_http_user`: SSH user for accessing provisioner server
 3. Validate syntax: `ansible-lint playbooks/bare_metal_deploy_prep.yml`
 4. Prepare virtual media: `ansible-playbook playbooks/bare_metal_deploy_prep.yml`
+   - Executes on localhost with orchestration pattern
+   - Loops over `groups['infra_servers']` for per-host artifacts
+   - Transfers files via rsync to http_servers and infra_servers
 5. Install OS: `ansible-playbook playbooks/bare_metal_deploy_install.yml`
 
 ### Phase 2: KVM Host Configuration
