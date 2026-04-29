@@ -1,0 +1,9 @@
+---
+# Kickstart Preparation Variables
+iso_filename: "rhel-9.7-x86_64-dvd.iso"
+img_filename: "oemdrv.img"
+
+# HTTP Server Configuration
+http_server_base_url: "http://provisioner.domain.test/provision"
+remote_http_docroot: "/var/www/html/provision"
+...

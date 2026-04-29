@@ -1,16 +1,4 @@
 ---
-# Kickstart Preparation Variables
-local_workspace: "/tmp/kickstart"
-local_iso_path: "/path/to/rhel-9.4-x86_64-dvd.iso" # DO NOT include the iso_filename in the path to local iso
-iso_filename: "rhel-9.7-x86_64-dvd.iso"
-img_filename: "oemdrv.img"
-
-# HTTP Server Configuration
-remote_http_host: "provisioner.domain.test"
-remote_http_user: "ansible"
-remote_http_docroot: "/var/www/html/provision"
-http_server_base_url: "http://provisioner.domain.test/provision"
-
 # RAID Configuration
 raid_level: 10
 raid_name: "md0"

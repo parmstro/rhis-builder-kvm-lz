@@ -100,7 +100,7 @@ real=`grep -l {{ vm.network.mac }} /sys/class/net/*/{bonding_slave/perm_hwaddr,a
 
 nmcli con add type ethernet con-name "$real" ifname "$real" \
     ipv4.method manual \
-    ipv4.addresses {{ vm.network.ipv4_address }}/{{ vm.network.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
+    ipv4.addresses {{ (vm.network.ipv4_address ~ '/' ~ vm.network.ipv4_netmask) | ansible.utils.ipaddr('host/prefix') }} \
     ipv4.gateway {{ vm.network.ipv4_gateway }} \
     ipv4.dns "{{ vm.network.name_server1 }} {{ vm.network.name_server2 }}" \
     ipv4.dns-search "{{ vm.network.domain }}" \
@@ -125,7 +125,7 @@ chown -R {{ vm.username }}:{{ vm.username }} ~{{ vm.username }}/.ssh
 chmod -R go= ~{{ vm.username }}/.ssh
 
 cat >> /etc/sudoers.d/{{ vm.username }} <<EOF
-{{ user_sudoer_policy }}
+{{ vm.user_sudoer_policy }}
 EOF
 
 cat >> /etc/hosts <<EOF

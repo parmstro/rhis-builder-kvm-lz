@@ -27,12 +27,12 @@
     # --- Dell OpenManage Collection Power Task ---
 
     - name: Initiate cold reboot (Power Cycle) via iDRAC
-      dellemc.openmanage.idrac_server_power:
-        idrac_ip: "{{ ansible_host }}"
-        idrac_user: "{{ idrac_user }}"
-        idrac_password: "{{ idrac_password }}"
+      dellemc.openmanage.redfish_powerstate:
+        baseuri: "{{ ansible_host }}"
+        username: "{{ idrac_user }}"
+        password: "{{ idrac_password }}"
         validate_certs: false
-        power_state: "PowerCycle"
+        reset_type: "PowerCycle"
       delegate_to: localhost
 
     # --- OS Reachability Monitor ---

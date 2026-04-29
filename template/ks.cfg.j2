@@ -146,7 +146,7 @@ sanitized_real=`echo $real | sed s/:/_/`
 
 nmcli con add type ethernet con-name "$real" ifname "$real" \
     ipv4.method manual \
-    ipv4.addresses {{ host.ipv4_address'/'host.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
+    ipv4.addresses {{ host.ipv4_address ~ '/' ~ host.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
     ipv4.gateway {{ host.ipv4_gateway }} \
     ipv4.dns "{{ host.name_server1 }} {{ host.name_server2 }}" \
     ipv4.dns-search "{{ host.domain }}" \

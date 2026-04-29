@@ -1,0 +1,9 @@
+---
+# Kickstart Preparation Variables
+local_workspace: "/tmp/kickstart"
+local_iso_path: "/path/to/iso-dir" # directory where ISOs are located
+
+# HTTP Server Configuration
+remote_http_host: "provisioner.domain.test"
+remote_http_user: "runner"
+...
