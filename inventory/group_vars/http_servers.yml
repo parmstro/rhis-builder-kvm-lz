@@ -1,0 +1,5 @@
+---
+local_iso_path: "/path/to/iso-dir" # directory where ISOs are located
+remote_http_host: "10.5.200.200"
+remote_http_user: "ansible_worker"
+...

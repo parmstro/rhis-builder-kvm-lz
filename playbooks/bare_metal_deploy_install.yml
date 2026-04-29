@@ -9,7 +9,7 @@
     
     - name: Configure First Boot Device to Virtual CD (Boot Once)
       ansible.builtin.uri:
-        url: "https://{{ ansible_host }}/redfish/v1/Systems/System.Embedded.1"
+        url: "https://{{ idrac_ip }}/redfish/v1/Systems/System.Embedded.1"
         method: PATCH
         user: "{{ idrac_user }}"
         password: "{{ idrac_password }}"
@@ -28,7 +28,7 @@
 
     - name: Initiate cold reboot (Power Cycle) via iDRAC
       dellemc.openmanage.redfish_powerstate:
-        baseuri: "{{ ansible_host }}"
+        baseuri: "{{ idrac_ip }}"
         username: "{{ idrac_user }}"
         password: "{{ idrac_password }}"
         validate_certs: false

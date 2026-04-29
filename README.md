@@ -60,13 +60,13 @@ Edit inventory files with your server details:
 vim inventory/hosts.yml
 
 # Shared variables (all hosts)
-vim inventory/group_vars/all.yml
+vim inventory/group_vars/all/all.yml
+
+# HTTP server variables
+vim inventory/group_vars/http_servers.yml
 
 # Group variables (KVM hypervisors)
 vim inventory/group_vars/infra_servers.yml
-
-# Localhost orchestration variables
-vim inventory/host_vars/localhost.yml
 
 # Host-specific variables
 vim inventory/host_vars/infra1.yml
@@ -76,20 +76,24 @@ vim inventory/host_vars/infra3.yml
 
 **Key configurations:**
 
-**`inventory/group_vars/all.yml` (shared across all hosts):**
+**`inventory/hosts.yml` (inventory definition):**
+- Per-host `ansible_host`: Production network IP for OS access
+- Per-host `idrac_ip`: Out-of-band management network IP for iDRAC access
+- Per-host `idrac_user` and `idrac_password`: iDRAC credentials (use `ansible-vault` for production)
+
+**`inventory/group_vars/all/all.yml` (shared across all hosts):**
 - `iso_filename`: RHEL ISO filename
 - `img_filename`: OEMDRV image filename
+- `local_workspace`: Local workspace directory for kickstart generation
 - `http_server_base_url`: Base URL for HTTP installation media
 - `remote_http_docroot`: HTTP server document root path
 
-**`inventory/host_vars/localhost.yml` (localhost orchestration):**
-- `local_workspace`: Local workspace directory for kickstart generation
+**`inventory/group_vars/http_servers.yml` (HTTP server group):**
 - `local_iso_path`: Directory containing RHEL ISO
-- `remote_http_host`: Provisioner/HTTP server hostname
+- `remote_http_host`: Provisioner/HTTP server hostname or IP
 - `remote_http_user`: SSH user for accessing HTTP server
 
 **`inventory/host_vars/infra*.yml` (per-host):**
-- iDRAC credentials
 - Network settings (IP, MAC addresses)
 - Disk paths (disk-by-id):
   - `boot_disk` and `root_disk`: Fallback if Dell BOSS not detected
@@ -100,26 +104,22 @@ vim inventory/host_vars/infra3.yml
 
 ### 3. Prepare Installation Media
 
-Place RHEL 9 ISO in the directory specified in `inventory/host_vars/localhost.yml`:
+Place RHEL 9 ISO in the directory specified in `inventory/group_vars/http_servers.yml`:
 
 ```yaml
 local_iso_path: "/path/to/iso-dir"  # Directory containing ISOs
+remote_http_host: "provisioner.domain.test"
+remote_http_user: "ansible"
 ```
 
-ISO filename is configured in `inventory/group_vars/all.yml`:
+ISO filename and workspace configuration in `inventory/group_vars/all/all.yml`:
 
 ```yaml
 iso_filename: "rhel-9.7-x86_64-dvd.iso"
 img_filename: "oemdrv.img"
+local_workspace: "/tmp/kickstart"
 http_server_base_url: "http://provisioner.domain.test/provision"
 remote_http_docroot: "/var/www/html/provision"
-```
-
-HTTP server configuration in `inventory/host_vars/localhost.yml`:
-
-```yaml
-remote_http_host: "provisioner.domain.test"
-remote_http_user: "ansible"
 ```
 
 **HTTP server directory structure created:**
@@ -150,33 +150,33 @@ ansible-playbook playbooks/bare_metal_deploy_install.yml
 
 **What happens (bare_metal_deploy_prep.yml):**
 
-This playbook uses a localhost-based orchestration pattern with multiple plays:
+This playbook uses a localhost-based orchestration pattern:
 
-1. **Play 1 (localhost)**: Local workspace setup
-   - Installs required packages (dosfstools, mtools)
-   - Creates local workspace directory
-   - Loops over `groups['infra_servers']` to generate per-host artifacts:
-     - Kickstart configuration files from template
-     - 10MB FAT32 OEMDRV images with embedded kickstart
+1. **Play 1 (localhost)**: Orchestrates entire preparation workflow
+   - **Local workspace setup:**
+     - Installs required packages (dosfstools, mtools)
+     - Creates local workspace directory
+     - Loops over `groups['infra_servers']` to generate per-host artifacts:
+       - Kickstart configuration files from template
+       - 10MB FAT32 OEMDRV images with embedded kickstart
+   - **Remote HTTP server directory setup (delegated to http_servers):**
+     - Creates HTTP document root structure
+     - Creates `iso/` and `image/` subdirectories
+     - Creates per-host image directories (`image/{{ hostname }}/`)
+   - **Transfer files to HTTP server:**
+     - Uses `ansible.posix.synchronize` (rsync) to transfer:
+       - ISO to HTTP server (shared: `iso/{{ iso_filename }}`)
+       - OEMDRV images to host-specific directories (`image/{{ hostname }}/oemdrv.img`)
+   - **SELinux configuration (delegated to http_servers):**
+     - Updates SELinux fcontext for HTTP document root
+     - Applies SELinux contexts using restorecon
 
-2. **Play 2 (http_servers)**: Remote HTTP server directory setup
-   - Creates HTTP document root structure
-   - Creates `iso/` and `image/` subdirectories
-   - Creates per-host image directories (`image/{{ hostname }}/`)
-
-3. **Play 3 (localhost)**: Transfer files to HTTP server
-   - Uses `ansible.posix.synchronize` (rsync) to transfer:
-     - ISO to HTTP server (shared: `iso/{{ iso_filename }}`)
-     - OEMDRV images to host-specific directories (`image/{{ hostname }}/oemdrv.img`)
-
-4. **Play 4 (http_servers)**: SELinux configuration
-   - Updates SELinux fcontext for HTTP document root
-   - Applies SELinux contexts using restorecon
-
-5. **Play 5 (infra_servers)**: iDRAC virtual media mounting
+2. **Play 2 (infra_servers)**: iDRAC virtual media mounting
    - Loops over each infra_server to mount virtual media via iDRAC:
      - Index 1 (DVD): ISO from HTTP server
      - Index 2 (USBStick): Host-specific OEMDRV image from HTTP server
+   - Uses `idrac_ip` (management network) for out-of-band access
+   - Runs from control node with `delegate_to: localhost`
 
 **What happens (bare_metal_deploy_install.yml):**
 1. Configures boot override to Virtual CD
@@ -448,10 +448,12 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 ├── inventory/
 │   ├── hosts.yml                            # Inventory definition
 │   ├── group_vars/
-│   │   ├── all.yml                          # Variables shared across all hosts
+│   │   ├── all/
+│   │   │   └── all.yml                      # Variables shared across all hosts
+│   │   ├── http_servers.yml                 # Group variables for HTTP servers
 │   │   └── infra_servers.yml                # Group variables for KVM hosts
 │   └── host_vars/
-│       ├── localhost.yml                    # Localhost orchestration variables
+│       ├── localhost.yml                    # Empty (reserved for localhost overrides)
 │       ├── infra1.yml                       # Host-specific variables
 │       ├── infra2.yml
 │       └── infra3.yml
@@ -491,7 +493,8 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 
 Before deploying to production:
 
-- [ ] Replace `idrac_password` with vaulted credential
+- [ ] Replace `idrac_password` in `inventory/hosts.yml` with vaulted credential
+- [ ] Verify `idrac_ip` addresses use out-of-band management network (not production network)
 - [ ] Generate real password hashes (replace `$YourSaltHere$YourHashHere`)
 - [ ] Verify Red Hat activation key is vaulted (if real)
 - [ ] Run `gitleaks detect` to check for credential leaks
