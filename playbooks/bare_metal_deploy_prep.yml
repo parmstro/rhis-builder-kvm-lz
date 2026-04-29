@@ -64,11 +64,6 @@
       become: true
       loop: "{{ groups['infra_servers'] }}"
 
-- name: Transfer, and Mount Virtual Media for Kickstart Installation
-  hosts: localhost
-  gather_facts: false
-
-  tasks:
     # =====================================================================
     # --- TRANSFER FILES TO REMOTE HTTP SERVER ---
     # =====================================================================
@@ -79,6 +74,7 @@
         dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ iso_filename }}"
         rsync_opts:
           - "--chmod=0644"
+      become: true
 
     - name: Copy local OEMDRV image to remote HTTP server image subdirectory for each host
       ansible.posix.synchronize:
@@ -86,13 +82,9 @@
         dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/image/{{ hostvars[item].host.hostname }}/{{ img_filename }}"
         rsync_opts:
           - "--chmod=0644"
+      become: true
       loop: "{{ groups['infra_servers'] }}"
 
-- name: Prepare Virtual Media http_server - adjust SELinux attributes
-  hosts: http_servers
-  gather_facts: false
-
-  tasks:
     # =====================================================================
     # --- SELINUX CONFIGURATION ---
     # =====================================================================
@@ -136,7 +128,7 @@
 
     - name: Mount ISO and IMG via iDRAC Virtual Media for each host
       dellemc.openmanage.idrac_virtual_media:
-        idrac_ip: "{{ ansible_host }}"
+        idrac_ip: "{{ idrac_ip }}"
         idrac_user: "{{ idrac_user }}"
         idrac_password: "{{ idrac_password }}"
         validate_certs: false
@@ -150,4 +142,5 @@
             insert: true
             media_type: "USBStick"
             image: "{{ http_server_base_url }}/image/{{ host.hostname }}/{{ img_filename }}"
+      delegate_to: localhost # Run from control node to the iDRAC IP
 ...

@@ -145,10 +145,12 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 ├── inventory/
 │   ├── hosts.yml                                # Inventory file
 │   ├── group_vars/
-│   │   ├── all.yml                              # Variables shared across all hosts
+│   │   ├── all/
+│   │   │   └── all.yml                          # Variables shared across all hosts
+│   │   ├── http_servers.yml                     # Group variables for HTTP servers
 │   │   └── infra_servers.yml                    # Group variables for KVM hosts
 │   └── host_vars/
-│       ├── localhost.yml                        # Localhost-specific variables
+│       ├── localhost.yml                        # Empty (reserved for localhost overrides)
 │       ├── infra1.yml                           # Host-specific variables
 │       ├── infra2.yml
 │       └── infra3.yml
@@ -177,24 +179,30 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 
 ### Phase 1: Bare Metal Provisioning (Dell iDRAC)
 
-1. Update `inventory/host_vars/*.yml` with host-specific configuration
-2. Update shared variables:
-   - `inventory/group_vars/all.yml`: Shared across all hosts
+1. Update `inventory/hosts.yml` with inventory configuration:
+   - Per-host `ansible_host`: Production network IP for OS access
+   - Per-host `idrac_ip`: Out-of-band management network IP for iDRAC operations
+   - Per-host `idrac_user` and `idrac_password`: iDRAC credentials (use ansible-vault for production)
+2. Update `inventory/host_vars/*.yml` with host-specific configuration
+3. Update shared variables:
+   - `inventory/group_vars/all/all.yml`: Shared across all hosts
      - `iso_filename`: RHEL ISO filename (e.g., `rhel-9.7-x86_64-dvd.iso`)
      - `img_filename`: OEMDRV image filename (e.g., `oemdrv.img`)
+     - `local_workspace`: Local workspace directory (e.g., `/tmp/kickstart`)
      - `http_server_base_url`: Base URL for HTTP server (e.g., `http://provisioner.domain.test/provision`)
      - `remote_http_docroot`: HTTP server document root path (e.g., `/var/www/html/provision`)
-   - `inventory/host_vars/localhost.yml`: Localhost orchestration variables
-     - `local_workspace`: Local workspace directory (e.g., `/tmp/kickstart`)
+   - `inventory/group_vars/http_servers.yml`: HTTP server group variables
      - `local_iso_path`: Directory containing RHEL ISO (e.g., `/home/user/iso`)
      - `remote_http_host`: Provisioner server hostname for hosting installation media
      - `remote_http_user`: SSH user for accessing provisioner server
-3. Validate syntax: `ansible-lint playbooks/bare_metal_deploy_prep.yml`
-4. Prepare virtual media: `ansible-playbook playbooks/bare_metal_deploy_prep.yml`
-   - Executes on localhost with orchestration pattern
+4. Validate syntax: `ansible-lint playbooks/bare_metal_deploy_prep.yml`
+5. Prepare virtual media: `ansible-playbook playbooks/bare_metal_deploy_prep.yml`
+   - Single localhost play orchestrates the entire workflow
    - Loops over `groups['infra_servers']` for per-host artifacts
-   - Transfers files via rsync to http_servers and infra_servers
-5. Install OS: `ansible-playbook playbooks/bare_metal_deploy_install.yml`
+   - Delegates http_servers tasks as needed
+   - Transfers files via rsync to http_servers
+6. Install OS: `ansible-playbook playbooks/bare_metal_deploy_install.yml`
+   - Uses `idrac_ip` for out-of-band iDRAC access (not `ansible_host`)
 
 ### Phase 2: KVM Host Configuration
 
