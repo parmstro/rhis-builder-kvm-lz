@@ -76,6 +76,24 @@
           - "--chmod=0644"
       become: true
 
+    - name: Copy local ISO to /dev/shm on remote HTTP server for tmpfs performance
+      ansible.posix.synchronize:
+        src: "{{ local_iso_path }}/{{ iso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:/dev/shm/{{ iso_filename }}"
+        rsync_opts:
+          - "--chmod=0644"
+      become: true
+      when: iso_use_tmpfs | bool
+
+    - name: Create symlink from HTTP docroot to ISO in /dev/shm
+      ansible.builtin.file:
+        src: "/dev/shm/{{ iso_filename }}"
+        dest: "{{ remote_http_docroot }}/iso/{{ iso_filename }}"
+        state: link
+        force: true
+      become: true
+      when: iso_use_tmpfs | bool
+
     - name: Copy local OEMDRV image to remote HTTP server image subdirectory for each host
       ansible.posix.synchronize:
         src: "{{ local_workspace }}/{{ hostvars[item].host.hostname }}-{{ img_filename }}"
