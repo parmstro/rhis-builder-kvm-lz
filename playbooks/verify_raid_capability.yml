@@ -1,0 +1,38 @@
+---
+- name: Verify RAID 10 Capability from Detected Storage Devices
+  hosts: infra_servers
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Display host information
+      ansible.builtin.debug:
+        msg: "Verifying RAID capability for {{ host.hostname }}.{{ host.domain }} ({{ ansible_host }})"
+
+    # =====================================================================
+    # --- Auto-detect NVMe Devices and Verify RAID Capability ---
+    # =====================================================================
+
+    - name: Detect NVMe devices and verify RAID capability
+      ansible.builtin.include_tasks: ../tasks/detect_nvme_raid_devices.yml
+
+    # =====================================================================
+    # --- Verification Summary ---
+    # =====================================================================
+
+    - name: Display RAID capability verification summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "RAID 10 Capability Verification"
+          - "=========================================="
+          - "Host: {{ host.hostname }}.{{ host.domain }}"
+          - "RAID Level: {{ raid_level }}"
+          - "RAID Name: {{ raid_name }}"
+          - "Number of devices: {{ host.additional_disks | length }}"
+          - "Devices:"
+          - "{{ host.additional_disks }}"
+          - "=========================================="
+          - "Status: RAID 10 capability confirmed"
+          - "=========================================="
+...
