@@ -91,21 +91,32 @@ ansible-core
 {% endif %}
 %end
 
-
-%pre
+%pre --interpreter=/bin/bash
 # Use DELLBOSS device for OS install if present.
-BOSS_DEV=$(find /dev -name "*Dell_BOSS*" -printf %P"\n" | \
-                egrep -v -e part -e scsi| tail -1)
+# 1. Search by-id directly.
+# 2. Suppress stderr for missing directories.
+# 3. Use grep -E and sort for consistent, predictable targeting.
+BOSS_SYMLINK=$(find /dev/disk/by-id -name "*Dell_BOSS*" 2>/dev/null | grep -E -v 'part|scsi' | sort | head -n 1)
 
-if [ -n "$BOSS_DEV" ]; then
+if [ -n "$BOSS_SYMLINK" ]; then
+        # readlink resolves to /dev/sda, basename strips it down to just 'sda'
+        BOSS_DEV=$(basename "$(readlink -f "$BOSS_SYMLINK")")
+        
         BOOT_DISK="$BOSS_DEV"
         ROOT_DISK="$BOSS_DEV"
         echo "ignoredisk --only-use=\"$BOSS_DEV\"" > /tmp/bootdisk.cfg
+{% if host.boot_disk is defined and host.root_disk is defined %}
 else
-        # Fallback to configured disks from host variables
+        # Fallback to configured disks from Ansible host variables
         BOOT_DISK="{{ host.boot_disk }}"
         ROOT_DISK="{{ host.root_disk }}"
+
+        # Ensure the file exists even if empty, preventing %include failures
         touch /tmp/bootdisk.cfg
+
+        # Optional: If you want ignoredisk to apply to the Ansible fallback as well
+        # echo "ignoredisk --only-use=\"$BOOT_DISK\"" > /tmp/bootdisk.cfg
+{% endif %}
 fi
 
 # Generate clearpart command with detected or configured disk

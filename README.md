@@ -179,11 +179,14 @@ This playbook uses a localhost-based orchestration pattern:
    - Runs from control node with `delegate_to: localhost`
 
 **What happens (bare_metal_deploy_install.yml):**
-1. Configures boot override to Virtual CD
-2. Reboots servers
-3. Kickstart %pre phase detects Dell BOSS device for OS installation (if present)
-4. Dynamically generates partition commands based on detected hardware
-5. Waits for OS installation and SSH availability (up to 60 minutes)
+1. Configures boot override to Virtual CD (boot once, then revert to HDD)
+   - Uses `dellemc.openmanage.idrac_boot` module for boot configuration
+   - Targets Virtual Network File 1 (mounted ISO via iDRAC virtual media)
+2. Power cycles servers via iDRAC
+3. Servers boot from virtual CD and begin kickstart installation
+4. Kickstart %pre phase detects Dell BOSS device for OS installation (if present)
+5. Dynamically generates partition commands based on detected hardware
+6. Waits for OS installation and SSH availability (up to 60 minutes)
 
 #### Phase 2: KVM Host Configuration
 

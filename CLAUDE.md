@@ -22,6 +22,10 @@ This project follows the [Red Hat COP Automation Good Practices](https://redhat-
   - ✅ `ansible.builtin.template`
   - ❌ `template`
 - **Prefer ansible.builtin prefix**: Even though other FQCN formats are valid, use `ansible.builtin.*` for core modules
+- **Prefer collection-specific modules**: Use dedicated collection modules over generic API calls
+  - ✅ `dellemc.openmanage.idrac_boot` for boot configuration
+  - ❌ `ansible.builtin.uri` with manual Redfish API calls
+  - Rationale: Better idempotency, error handling, and maintainability
 - **YAML syntax**: Use YAML dictionary format, not `key=value` format
 
 ### Variable Management
@@ -202,6 +206,10 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
    - Delegates http_servers tasks as needed
    - Transfers files via rsync to http_servers
 6. Install OS: `ansible-playbook playbooks/bare_metal_deploy_install.yml`
+   - Configures boot override to Virtual CD using `dellemc.openmanage.idrac_boot` module
+   - Boot once enabled (reverts to HDD after installation)
+   - Power cycles servers via `dellemc.openmanage.redfish_powerstate` module
+   - Waits for SSH availability (timeout: 60 minutes)
    - Uses `idrac_ip` for out-of-band iDRAC access (not `ansible_host`)
 
 ### Phase 2: KVM Host Configuration

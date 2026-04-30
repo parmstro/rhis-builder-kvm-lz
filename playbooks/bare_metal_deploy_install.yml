@@ -5,35 +5,41 @@
   gather_facts: false
 
   tasks:
-    # --- Redfish API Boot Override ---
-    
+    # --- Boot Override Configuration ---
+
     - name: Configure First Boot Device to Virtual CD (Boot Once)
-      ansible.builtin.uri:
-        url: "https://{{ idrac_ip }}/redfish/v1/Systems/System.Embedded.1"
-        method: PATCH
-        user: "{{ idrac_user }}"
-        password: "{{ idrac_password }}"
+      dellemc.openmanage.idrac_boot:
+        idrac_ip: "{{ idrac_ip }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
         validate_certs: false
-        force_basic_auth: true
-        body_format: json
-        body:
-          Boot:
-            # "Cd" targets the Virtual CD/Network File 1 endpoint
-            BootSourceOverrideTarget: "Cd"
-            # Ensures the server reverts to its default local disk boot order afterwards
-            BootSourceOverrideEnabled: "Once"
+        boot_source_override_mode: "uefi"
+        boot_source_override_target: "cd"
+        boot_source_override_enabled: "once"
       delegate_to: localhost
 
-    # --- Dell OpenManage Collection Power Task ---
+    # --- Power State Management ---
 
-    - name: Initiate cold reboot (Power Cycle) via iDRAC
+    - name: Attempt graceful restart via iDRAC
       dellemc.openmanage.redfish_powerstate:
         baseuri: "{{ idrac_ip }}"
         username: "{{ idrac_user }}"
         password: "{{ idrac_password }}"
         validate_certs: false
-        reset_type: "PowerCycle"
+        reset_type: "GracefulRestart"
       delegate_to: localhost
+      register: restart_result
+      ignore_errors: true
+
+    - name: Power on device if already powered off
+      dellemc.openmanage.redfish_powerstate:
+        baseuri: "{{ idrac_ip }}"
+        username: "{{ idrac_user }}"
+        password: "{{ idrac_password }}"
+        validate_certs: false
+        reset_type: "On"
+      delegate_to: localhost
+      when: "'already powered off' in restart_result.msg | lower"
 
     # --- OS Reachability Monitor ---
 
