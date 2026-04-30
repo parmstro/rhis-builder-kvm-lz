@@ -17,6 +17,7 @@ host:
   root_disk: "disk/by-id/wwn-0x5000c500a1b2c3d5"
 
   # Additional NVMe disks for RAID 10 array
+  # These MUST exist, otherwise kickstart will fail
   additional_disks:
     - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R402234"
     - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R402235"

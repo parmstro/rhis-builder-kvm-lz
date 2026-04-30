@@ -19,6 +19,7 @@ host:
 
   # Additional NVMe disks for RAID 10 array (post-install)
   # These will be used by mdadm to create the RAID array
+  # These MUST exist, otherwise kickstart will fail
   additional_disks:
     - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R401234"
     - "disk/by-id/nvme-SAMSUNG_MZVL21T0HCLR-00B00_S675NE0R401235"
