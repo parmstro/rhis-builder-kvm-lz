@@ -67,13 +67,16 @@ This project follows the [Red Hat COP Automation Good Practices](https://redhat-
     - Playbook fails fast if fewer than 4 disks available
   - Dual Storage Pool Architecture:
     - RAID array partitioned based on VM volume_mode requirements
-    - **Filesystem Pool** (volume_mode: filesystem): 1TB LVM partition with XFS, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
-    - **Block Pool** (volume_mode: block): 1TB LVM volume group, libvirt pool type `logical` for direct block access
+    - **Filesystem Pool** (volume_mode: filesystem): 1TiB LVM partition with XFS, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
+    - **Block Pool** (volume_mode: block): 1TiB LVM volume group, libvirt pool type `logical` for direct block access
     - VM definitions in `vars/vm_vars.yml` determine which pools are created
     - Each pool created only if corresponding volume_mode is defined in VM disks
+    - Partition sizes use TiB (binary) units for parted compatibility
 - **Network Configuration**:
   - Primary NIC: Configured during kickstart (identified by MAC address)
   - Libvirt bridge: Configured on second NIC with active link
+    - Existing connections removed (including DHCP) before bridging
+    - Bridge configured with no IP address (IPv4/IPv6 disabled)
   - Network naming: `libvirt_net1` (incremental naming for future expansion)
 - **Disk Naming**: Uses `/dev/disk/by-id/` for stable device references
 
@@ -119,6 +122,13 @@ vms:
           capacity: <GB>
           bus: virtio|scsi
           volume_mode: filesystem|block
+    performance:                                    # Optional: Performance tuning parameters
+      hugepages: true|false                         # Enable huge pages backing (default: true)
+      network_queues: <count>                       # virtio network queues (default: 2, max: vcpu count)
+      iothread_count: <count>                       # Number of I/O threads (default: 1, max: vcpu count)
+      vcpu_max: <count>                             # Maximum vCPUs for dynamic hotplug (optional, enables CPU hotplug)
+      iommu_passthrough: true|false                 # Enable guest IOMMU passthrough (default: false, use for NVMe passthrough)
+      guest_kernel_params: "<params>"               # Additional kernel parameters for guest (optional)
     redhat:
       org: "<organization_id>"                      # Red Hat organization ID
       activation_key: "<activation_key_name>"       # Red Hat activation key
@@ -126,17 +136,53 @@ vms:
 
 Each VM is assigned to a specific hypervisor host via the `target_host` field. The deployment playbook filters VMs per host, allowing targeted deployment across the cluster.
 
+**Performance Tuning**: The optional `performance` section enables fine-grained control over VM performance characteristics based on IBM KVM best practices. All parameters have sensible defaults and can be omitted for standard configurations.
+
 **Authentication and Subscription**: VM credentials and subscription details are defined per-VM in `vars/vm_vars.yml` using Ansible vault variables for sensitive data. Common credentials can be referenced from `inventory/group_vars/infra_servers.yml` using vault variable syntax (e.g., `{{ encrypted_root_pass_vault }}`).
 
 **Filesystem Layout**: The `fs` section defines compliance-focused LVM partitioning with separate volumes for system directories. Setting `lv_var_mb: 1` allocates remaining space to `/var`.
 
+**Performance Parameters**:
+- `hugepages` (default: true): Backs VM memory with huge pages on the host for improved memory performance. Disable if host paging or IBM Secure Execution is required.
+- `network_queues` (default: 2): Number of virtio network queues for parallel packet processing. Set to at least 2 for VMs with multiple vCPUs. Do not exceed vCPU count.
+- `iothread_count` (default: 1): Number of I/O threads for disk devices. Start with 1; increase for high-I/O workloads. Do not exceed vCPU count or configure idle threads.
+- `vcpu_max` (optional): Maximum vCPUs for dynamic hotplug. If specified, VM starts with `vcpu` count and can scale up to `vcpu_max`. Enables CPU hotplug capability.
+- `iommu_passthrough` (default: false): Enables guest IOMMU passthrough for improved PCI passthrough performance of NVMe/network devices. Note: Disables memory over-commitment.
+- `guest_kernel_params` (optional): Additional kernel parameters appended to GRUB_CMDLINE_LINUX in guest. Useful for specialized tuning.
+
 ### Performance Tuning
 
-- **SCSI controller**: virtio-scsi with queues matching vCPU count
-- **IO threads**: Enabled for SCSI disks
-- **Cache mode**: `none` (direct I/O)
-- **IO mode**: `native` (kernel async I/O)
-- **Discard**: `unmap` enabled for thin provisioning
+This project implements IBM KVM performance best practices at both the hypervisor and VM levels.
+
+**Hypervisor-Level Tuning** (configured in `playbooks/kvm_host_configure.yml`):
+- **tuned profile**: `virtual-host` profile optimized for KVM hypervisors
+- **Huge pages**: Automatically reserved based on available memory (70% of total memory)
+- **KVM module parameters**:
+  - `hpage=1`: Enables huge page support for VMs
+  - `halt_poll_ns`: Configurable idle vCPU polling period (default: 50000ns)
+- **CPU scheduler**: Configurable migration cost (kernel.sched_migration_cost_ns, default: 500000ns)
+- **cgroup controller**: cpuset disabled for CPU hotplug support (cgroups v1 only)
+- **Libvirt configuration**: Optimized for KVM workloads
+
+**VM-Level Tuning** (configured per-VM in `vars/vm_vars.yml`):
+- **Memory backing**: Huge pages enabled by default for all VMs
+- **Memory balloon**: Disabled (model='none') to reduce overhead
+- **Network interface**:
+  - virtio driver with vhost backend
+  - Multi-queue support (default: 2 queues, configurable up to vCPU count)
+- **Storage**:
+  - virtio-scsi controller with queues matching vCPU count
+  - I/O threads enabled for SCSI disks (configurable count, distributed across disks)
+  - Cache mode: `none` (direct I/O, caching done by guest)
+  - IO mode: `native` (kernel async I/O)
+  - Discard: `unmap` enabled for thin provisioning
+- **CPU**: Dynamic vCPU hotplug support (optional)
+- **Guest kernel**: IOMMU passthrough for PCI passthrough performance (optional)
+
+**Configurable Parameters** (via `inventory/group_vars/infra_servers.yml`):
+- `hugepages_count`: Override automatic huge pages calculation
+- `kvm_halt_poll_ns`: Tune idle vCPU polling (50000ns default, 0 for low CPU usage, 80000ns for low latency)
+- `sched_migration_cost_ns`: Tune CPU migration algorithm (500000ns default)
 
 ## File Structure
 
@@ -162,9 +208,11 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 │   ├── bare_metal_deploy_prep.yml               # Phase 1: Prepare iDRAC virtual media
 │   ├── bare_metal_deploy_install.yml            # Phase 2: Boot and install OS
 │   ├── kvm_host_configure.yml                   # Phase 3: Configure RAID/libvirt/ISO
+│   ├── verify_raid_capability.yml               # Standalone: Verify RAID capability
 │   └── deploy_vm.yml                            # Phase 4: Deploy VMs with kickstart
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml     # Per-host kickstart/image generation
+│   ├── detect_nvme_raid_devices.yml             # NVMe device auto-detection and RAID verification
 │   ├── setup_raid.yml                           # RAID 10 configuration tasks
 │   ├── setup_libvirt.yml                        # Libvirt infrastructure tasks
 │   ├── distribute_iso.yml                       # RHEL ISO distribution to hypervisors
@@ -215,17 +263,28 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 ### Phase 2: KVM Host Configuration
 
 1. Configure RAID and libvirt: `ansible-playbook playbooks/kvm_host_configure.yml`
+   - Registers systems with Red Hat Subscription Manager using `host.org` and `host.activation_key`
+   - Installs virtualization packages via `@virtualization-host-environment` group
    - Auto-detects Dell DC NVMe devices and populates `host.additional_disks` if not defined
    - Verifies minimum 4 disks available (fails fast if insufficient)
    - Creates mdadm RAID 10 on additional NVMe disks
    - Loads VM definitions from `vars/vm_vars.yml` to detect storage requirements
-   - Partitions RAID array and creates LVM infrastructure based on volume_mode requirements:
+   - Partitions RAID array (using TiB units) and creates LVM infrastructure based on volume_mode requirements:
      - Filesystem pool (if any VM uses volume_mode: filesystem)
      - Block pool (if any VM uses volume_mode: block)
-   - Configures libvirt bridge network
-   - Creates appropriate libvirt storage pools
+   - Configures libvirt bridge network on second NIC:
+     - Removes existing connections (including DHCP) from physical interface
+     - Creates bridge with IPv4/IPv6 disabled (no IP address)
+     - Adds physical interface as bridge slave using modern NetworkManager syntax
+   - Creates appropriate libvirt storage pools with autostart enabled
    - Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
-   - Distributes RHEL ISO to each hypervisor's filesystem pool (`/mnt/md0/libvirt/filesystem/iso/`)
+   - Downloads RHEL ISO from HTTP server to each hypervisor's filesystem pool (`/mnt/md0/libvirt/filesystem/iso/`)
+   - Configures performance tuning (IBM KVM best practices):
+     - Sets tuned profile to `virtual-host`
+     - Configures KVM module parameters (hpage=1, halt_poll_ns)
+     - Reserves huge pages for VM memory backing
+     - Tunes CPU scheduler migration cost (if available on kernel)
+     - Disables cpuset cgroup controller (cgroups v1 only, enables CPU hotplug)
 
 ### Phase 3: VM Deployment
 
@@ -251,7 +310,48 @@ Each VM is assigned to a specific hypervisor host via the `target_host` field. T
 
 ## Additional Context
 
-_This section will be expanded as the project evolves. More details to come._
+### Performance Tuning Implementation Notes
+
+**Host-Level Changes That Require Reboot or Reload:**
+- **KVM module parameters** (`/etc/modprobe.d/kvm.conf`): Require stopping all VMs and reloading the KVM module:
+  ```bash
+  # Stop all VMs first
+  systemctl stop libvirtd
+  rmmod kvm_intel kvm  # or kvm_amd on AMD systems
+  modprobe kvm
+  systemctl start libvirtd
+  ```
+- **libvirt cgroup controller** (`/etc/libvirt/qemu.conf`): Requires restarting libvirtd:
+  ```bash
+  # Stop all VMs first
+  systemctl restart libvirtd
+  ```
+- **Huge pages and CPU scheduler**: Applied immediately via sysctl
+- **tuned profile**: Applied immediately
+
+**VM-Level Performance Features:**
+- Huge pages, multi-queue networking, I/O threads, and memory balloon exclusion are configured in VM XML during deployment
+- Dynamic vCPU hotplug requires the VM to be defined with `vcpu_max` parameter
+- Guest kernel parameters (iommu.passthrough) are configured during kickstart installation
+
+**Libvirt Infrastructure:**
+- Storage pools and networks require explicit `virsh pool-autostart` / `virsh net-autostart` commands for autostart
+- The `community.libvirt.virt_pool` and `community.libvirt.virt_net` modules' `autostart: true` parameter doesn't reliably apply to existing resources
+- Autostart is configured separately after pool/network activation to ensure reliability
+
+**Important Considerations:**
+- **Memory over-commitment**: Not possible with `iommu.passthrough=1` enabled on guest
+- **Huge pages**: Reduces available memory for host; ensure adequate RAM for host OS
+- **I/O threads**: More is not always better; start with 1 and increase only for high-I/O workloads
+- **Network queues**: Should not exceed vCPU count; 2 is optimal for most workloads
+- **CPU scheduler tuning**: The `kernel.sched_migration_cost_ns` parameter is optional and may not exist on all kernel versions; playbook handles gracefully
+- **Partition sizes**: Use TiB (binary, 1024-based) units for parted, not TB (decimal, 1000-based)
+- **ISO distribution**: Large ISO files (9.9 GB) are downloaded directly from HTTP server to avoid Ansible temp directory space issues
+
+**References:**
+- IBM KVM Performance Hints and Tips Summary (Last Updated: 2026-04-23)
+- Red Hat Virtualization Tuning and Optimization Guide
+- KVM Network Performance - Best Practices and Tuning Recommendations
 
 ## Notes for Claude
 

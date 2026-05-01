@@ -42,6 +42,12 @@ vms:
           capacity: 500
           bus: scsi
           volume_mode: block
+    performance:
+      hugepages: true                    # Enable huge pages backing (default)
+      network_queues: 1                  # virtio network queues (max: vcpu count)
+      iothread_count: 1                  # Number of I/O threads (default)
+      vcpu_max: 2                        # Maximum vCPUs for dynamic hotplug
+      iommu_passthrough: false           # Enable guest IOMMU passthrough (default)
     redhat:
       org: "12345678"
       activation_key: "redhat-activation-keyname"
@@ -88,6 +94,12 @@ vms:
           capacity: 200
           bus: scsi
           volume_mode: block
+    performance:
+      hugepages: true                    # Enable huge pages backing (default)
+      network_queues: 2                  # virtio network queues (default, matches vcpu count)
+      iothread_count: 1                  # Number of I/O threads (default)
+      vcpu_max: 4                        # Maximum vCPUs for dynamic hotplug
+      iommu_passthrough: false           # Enable guest IOMMU passthrough (default)
     redhat:
       org: "12345678"
       activation_key: "redhat-activation-keyname"
@@ -139,6 +151,12 @@ vms:
           capacity: 1000
           bus: scsi
           volume_mode: block
+    performance:
+      hugepages: true                    # Enable huge pages backing (default)
+      network_queues: 2                  # virtio network queues (default)
+      iothread_count: 2                  # Number of I/O threads (increased for database workload)
+      vcpu_max: 8                        # Maximum vCPUs for dynamic hotplug
+      iommu_passthrough: false           # Enable guest IOMMU passthrough (default)
     redhat:
       org: "12345678"
       activation_key: "redhat-activation-keyname"

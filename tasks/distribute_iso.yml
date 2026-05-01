@@ -17,9 +17,9 @@
   register: iso_stat
   become: true
 
-- name: Copy RHEL ISO from controller to hypervisor
-  ansible.builtin.copy:
-    src: "{{ local_iso_path }}/{{ iso_filename }}"
+- name: Download RHEL ISO from HTTP server to hypervisor
+  ansible.builtin.get_url:
+    url: "{{ http_server_base_url }}/iso/{{ iso_filename }}"
     dest: "{{ libvirt_pool_filesystem_path }}/iso/{{ iso_filename }}"
     mode: '0644'
     owner: root

@@ -35,10 +35,17 @@ timezone --utc UTC
 
 services --disabled gpm,sendmail,cups,pcmcia,isdn,rawdevices,hpoj,bluetooth,openibd,avahi-daemon,avahi-dnsconfd,hidd,hplip,pcscd
 
+{% set kernel_params = "nofb quiet splash=quiet" %}
+{% if vm.performance.iommu_passthrough is defined and vm.performance.iommu_passthrough %}
+{% set kernel_params = kernel_params + " iommu.passthrough=1" %}
+{% endif %}
+{% if vm.performance.guest_kernel_params is defined and vm.performance.guest_kernel_params != "" %}
+{% set kernel_params = kernel_params + " " + vm.performance.guest_kernel_params %}
+{% endif %}
 {% if vm.grub_enc_pass is defined and vm.grub_enc_pass != "" %}
-bootloader --append="nofb quiet splash=quiet" --iscrypted --password={{ vm.grub_enc_pass }}
+bootloader --append="{{ kernel_params }}" --iscrypted --password={{ vm.grub_enc_pass }}
 {% else %}
-bootloader --append="nofb quiet splash=quiet"
+bootloader --append="{{ kernel_params }}"
 {% endif %}
 
 # VM disk configuration - use first disk based on bus type
@@ -94,6 +101,14 @@ exec < /dev/tty3 > /dev/tty3
 chvt 3
 (
 logger "Starting anaconda {{ vm.network.hostname }}.{{ vm.network.domain }} postinstall"
+
+# Performance tuning kernel parameters configured
+{% if vm.performance.iommu_passthrough is defined and vm.performance.iommu_passthrough %}
+logger "Performance: Guest IOMMU passthrough enabled (iommu.passthrough=1)"
+{% endif %}
+{% if vm.performance.guest_kernel_params is defined and vm.performance.guest_kernel_params != "" %}
+logger "Performance: Additional kernel parameters: {{ vm.performance.guest_kernel_params }}"
+{% endif %}
 
 # Network configuration - find interface by MAC address
 real=`grep -l {{ vm.network.mac }} /sys/class/net/*/{bonding_slave/perm_hwaddr,address} 2>/dev/null | awk -F '/' '// {print $5}' | head -1`

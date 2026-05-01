@@ -1,5 +1,6 @@
 ---
 # Kickstart Preparation Variables
+local_iso_path: "/path/to/iso-dir" # directory where ISOs are located on controller
 iso_filename: "rhel-9.7-x86_64-dvd.iso"
 img_filename: "oemdrv.img"
 local_workspace: "/tmp/kickstart"
