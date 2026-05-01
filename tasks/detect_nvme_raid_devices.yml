@@ -21,7 +21,7 @@
 
 - name: Set additional_disks from auto-detection if not defined
   ansible.builtin.set_fact:
-    host: "{{ host | combine({'additional_disks': detected_nvme_devices.stdout_lines | map('regex_replace', '^', 'disk/by-id/') | list}, recursive=true) }}"
+    host: "{{ host | combine({'additional_disks': detected_nvme_devices.stdout_lines}, recursive=true) }}"
   when:
     - host.additional_disks is not defined
     - detected_nvme_devices.rc == 0

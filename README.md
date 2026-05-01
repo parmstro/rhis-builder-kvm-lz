@@ -19,7 +19,9 @@ This project provides a complete automation stack for deploying KVM hypervisor i
 - **Compliance-Focused**: Partitioning scheme meets DISA-STIG, CIS, PCI-DSS requirements
 - **Disk-by-ID Naming**: Stable device references using `/dev/disk/by-id/`
 - **Bridge Networking**: Libvirt bridge mode on secondary NIC with active link detection
-- **Performance Tuned**: virtio-scsi, IO threads, direct I/O for VM storage
+- **Performance Tuned**: IBM KVM best practices implemented
+  - Host: tuned virtual-host profile, huge pages, KVM module tuning, CPU scheduler optimization
+  - VM: virtio-scsi, I/O threads, multi-queue networking, huge pages backing, direct I/O
 
 ## Prerequisites
 
@@ -196,21 +198,32 @@ ansible-playbook playbooks/kvm_host_configure.yml
 ```
 
 **What happens:**
-1. Auto-detects Dell DC NVMe SSD devices and populates `host.additional_disks` if not defined
-2. Verifies minimum 4 disks available for RAID 10 (fails fast if insufficient)
-3. Creates mdadm RAID 10 on detected/configured NVMe disks
-4. Loads VM definitions from `vars/vm_vars.yml` to detect storage requirements
-5. Partitions RAID array based on volume_mode requirements:
-   - Partition 1 (1TB): Filesystem pool (if any VM uses `volume_mode: filesystem`)
-   - Partition 2 (1TB): Block pool (if any VM uses `volume_mode: block`)
-6. Creates LVM infrastructure and libvirt storage pools:
+1. Registers systems with Red Hat Subscription Manager using `host.org` and `host.activation_key`
+2. Installs virtualization packages via `@virtualization-host-environment` group
+3. Auto-detects Dell DC NVMe SSD devices and populates `host.additional_disks` if not defined
+4. Verifies minimum 4 disks available for RAID 10 (fails fast if insufficient)
+5. Creates mdadm RAID 10 on detected/configured NVMe disks
+6. Loads VM definitions from `vars/vm_vars.yml` to detect storage requirements
+7. Partitions RAID array (using TiB units) based on volume_mode requirements:
+   - Partition 1 (1TiB): Filesystem pool (if any VM uses `volume_mode: filesystem`)
+   - Partition 2 (1TiB): Block pool (if any VM uses `volume_mode: block`)
+8. Creates LVM infrastructure and libvirt storage pools:
    - **Filesystem pool**: XFS on LVM, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, pool type `dir`
    - **Block pool**: LVM volume group, pool type `logical` for direct block device access
-7. Detects secondary NIC and creates bridge
-8. Configures libvirt bridge-mode network
-9. Enables firewall rules and IP forwarding
-10. Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
-11. Distributes RHEL ISO to each hypervisor's filesystem pool at `/mnt/md0/libvirt/filesystem/iso/`
+9. Detects secondary NIC and configures bridge:
+   - Removes existing connections (including DHCP) from physical interface
+   - Creates bridge with IPv4/IPv6 disabled (no IP address)
+   - Adds physical interface as bridge slave using modern NetworkManager syntax
+10. Configures libvirt bridge-mode network with autostart enabled
+11. Enables firewall rules and IP forwarding
+12. Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
+13. Downloads RHEL ISO from HTTP server to each hypervisor's filesystem pool at `/mnt/md0/libvirt/filesystem/iso/`
+14. Configures performance tuning (IBM KVM best practices):
+    - Sets tuned profile to `virtual-host`
+    - Configures KVM module parameters (hpage=1, halt_poll_ns)
+    - Reserves huge pages for VM memory backing (70% of total memory)
+    - Tunes CPU scheduler migration cost (if available on kernel)
+    - Disables cpuset cgroup controller (cgroups v1 only, enables CPU hotplug)
 
 **Run specific sections:**
 ```bash
@@ -299,6 +312,8 @@ ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
 **Secondary NIC:**
 - Auto-detected (second NIC with active link)
 - Configured as libvirt bridge (`br1`)
+- Existing connections (including DHCP) removed before bridging
+- Bridge configured with no IP address (IPv4/IPv6 disabled)
 - Used for VM networking
 
 **Libvirt Network:**
@@ -337,7 +352,7 @@ ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
 - mdadm RAID 10 array on 4+ NVMe disks (auto-detected or configured)
 - Dual LVM-based storage pools (created based on VM requirements):
   - **Filesystem Pool** (`nvme_pool_fs`):
-    - 1TB GPT partition on RAID array
+    - 1TiB GPT partition on RAID array (using binary units for parted compatibility)
     - LVM physical volume and volume group (`vg_nvme_fs`)
     - 100% LVM logical volume formatted with XFS
     - Mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`
@@ -345,12 +360,13 @@ ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
     - SELinux context: `virt_image_t`
     - Used for VMs with `volume_mode: filesystem`
   - **Block Pool** (`nvme_pool_block`):
-    - 1TB GPT partition on RAID array
+    - 1TiB GPT partition on RAID array (using binary units for parted compatibility)
     - LVM physical volume and volume group (`vg_nvme_block`)
     - Libvirt pool type: `logical`
     - Direct block device access for VM disks
     - Used for VMs with `volume_mode: block`
 - VM definitions in `vars/vm_vars.yml` determine which pools are created
+- Storage pools and networks configured with autostart enabled
 - mdmonitor service enabled for RAID monitoring
 
 ### VM Definitions
@@ -428,6 +444,17 @@ Define vault variables in `inventory/group_vars/infra_servers.yml` or use Ansibl
 **Filesystem Layout:**
 The `fs` section defines compliance-focused LVM partitioning with separate volumes for critical system directories. Setting `lv_var_mb: 1` allocates all remaining space to `/var`.
 
+**Performance Configuration (Optional):**
+The optional `performance` section enables fine-grained control over VM performance characteristics based on IBM KVM best practices:
+- `hugepages` (default: true): Backs VM memory with huge pages for improved performance. Disable if host paging or IBM Secure Execution is required.
+- `network_queues` (default: 2): Number of virtio network queues for parallel packet processing. Should not exceed vCPU count.
+- `iothread_count` (default: 1): Number of I/O threads for disk devices. Start with 1; increase for high-I/O workloads. Do not exceed vCPU count.
+- `vcpu_max` (optional): Maximum vCPUs for dynamic hotplug. If specified, VM starts with `vcpu` count and can scale to `vcpu_max`.
+- `iommu_passthrough` (default: false): Enables guest IOMMU passthrough for improved PCI passthrough performance. Note: Disables memory over-commitment.
+- `guest_kernel_params` (optional): Additional kernel parameters appended to GRUB_CMDLINE_LINUX in guest.
+
+All performance parameters have sensible defaults and can be omitted for standard configurations.
+
 **Disk Bus Types:**
 - `virtio`: Best for general purpose, uses virtio-blk
 - `scsi`: virtio-scsi with queue matching vCPU count, IO threads enabled
@@ -464,9 +491,11 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 │   ├── bare_metal_deploy_prep.yml           # Phase 1a: Prepare virtual media
 │   ├── bare_metal_deploy_install.yml        # Phase 1b: Boot and install OS
 │   ├── kvm_host_configure.yml               # Phase 2: Configure RAID/libvirt/ISO
+│   ├── verify_raid_capability.yml           # Standalone: Verify RAID capability
 │   └── deploy_vm.yml                        # Phase 3: Deploy VMs with kickstart
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml # Per-host kickstart/image generation
+│   ├── detect_nvme_raid_devices.yml         # NVMe device auto-detection and verification
 │   ├── setup_raid.yml                       # RAID 10 configuration
 │   ├── setup_libvirt.yml                    # Libvirt infrastructure
 │   ├── distribute_iso.yml                   # RHEL ISO distribution
@@ -719,11 +748,11 @@ ssh infra1 "cat /mnt/md0/libvirt/filesystem/kickstart/idm1.domain.test-ks.cfg"
 4. Verifies minimum 4 disks available (fails fast if insufficient)
 5. `setup_raid.yml` creates mdadm RAID 10 array using `host.additional_disks` paths
 6. Loads VM definitions from `vars/vm_vars.yml` to detect volume_mode requirements
-7. Partitions RAID array with GPT partition table (1TB per pool type)
+7. Partitions RAID array with GPT partition table (1TiB per pool type, using binary units)
 8. Creates LVM infrastructure:
    - For filesystem mode: PV → VG (`vg_nvme_fs`) → LV → XFS → mount → dir pool
    - For block mode: PV → VG (`vg_nvme_block`) → logical pool
-9. Configures libvirt storage pools for each mode in use
+9. Configures libvirt storage pools for each mode in use with autostart enabled
 
 **Key Points:**
 - **Dell BOSS detection** is fully automatic during kickstart - used for OS installation
@@ -782,10 +811,16 @@ ansible-playbook playbooks/kvm_host_configure.yml -f 10
 
 ## References
 
+### Automation and Deployment
 - [Red Hat COP Automation Good Practices](https://redhat-cop.github.io/automation-good-practices/)
 - [Dell OpenManage Ansible Modules](https://github.com/dell/dellemc-openmanage-ansible-modules)
 - [Kickstart Documentation](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/performing_an_advanced_rhel_9_installation/kickstart-commands-and-options-reference_installing-rhel-as-an-experienced-user)
 - [libvirt Documentation](https://libvirt.org/docs.html)
+
+### Performance Tuning
+- IBM KVM Performance Hints and Tips Summary (Last Updated: 2026-04-23)
+- [Red Hat Virtualization Tuning and Optimization Guide](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/)
+- KVM Network Performance - Best Practices and Tuning Recommendations
 
 ## Contributing
 

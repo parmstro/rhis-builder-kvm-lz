@@ -7,9 +7,9 @@ raid_metadata_version: "1.2"
 
 # LVM Configuration
 lvm_vg_filesystem_name: "vg_nvme_fs"
-lvm_vg_filesystem_size: "1T"
+lvm_vg_filesystem_size: "1TiB"
 lvm_vg_block_name: "vg_nvme_block"
-lvm_vg_block_size: "1T"
+lvm_vg_block_size: "1TiB"
 
 # Libvirt Storage Pools
 libvirt_pool_filesystem_name: "nvme_pool_fs"

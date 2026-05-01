@@ -5,11 +5,7 @@
 - name: Ensure libvirt packages are installed
   ansible.builtin.dnf:
     name:
-      - libvirt
-      - libvirt-daemon-kvm
-      - qemu-kvm
-      - virt-install
-      - bridge-utils
+      - "@virtualization-host-environment"
       - NetworkManager
     state: present
 
@@ -48,6 +44,20 @@
       - "Primary interface (kickstart): {{ primary_interface.stdout }}"
       - "Bridge interface (libvirt): {{ physical_interface }}"
 
+- name: Get existing connections on physical interface
+  ansible.builtin.shell: |
+    set -o pipefail
+    nmcli -t -f NAME,DEVICE connection show | grep ":{{ physical_interface }}$" | cut -d: -f1
+  register: existing_connections
+  changed_when: false
+  failed_when: false
+
+- name: Delete existing connections on physical interface
+  ansible.builtin.command: nmcli connection delete "{{ item }}"
+  loop: "{{ existing_connections.stdout_lines }}"
+  when: existing_connections.stdout_lines | length > 0
+  changed_when: true
+
 - name: Create bridge connection
   community.general.nmcli:
     type: bridge
@@ -56,14 +66,17 @@
     state: present
     autoconnect: true
     stp: false
+    method4: disabled
+    method6: disabled
   register: bridge_created
 
 - name: Add physical interface as bridge slave
   community.general.nmcli:
-    type: bridge-slave
+    type: ethernet
     conn_name: "{{ libvirt_bridge_name }}-slave"
     ifname: "{{ physical_interface }}"
     master: "{{ libvirt_bridge_name }}"
+    slave_type: bridge
     state: present
     autoconnect: true
   register: slave_added
@@ -79,41 +92,33 @@
   when: bridge_created.changed or slave_added.changed
 
 - name: Check if libvirt bridge network exists
-  community.libvirt.virt_net:
-    command: info
-    name: "{{ libvirt_network_name }}"
-  register: network_info
+  ansible.builtin.command: virsh net-info {{ libvirt_network_name }}
+  register: network_check
   failed_when: false
-
-- name: Create libvirt bridge network XML
-  ansible.builtin.copy:
-    content: |
-      <network>
-        <name>{{ libvirt_network_name }}</name>
-        <forward mode='bridge'/>
-        <bridge name='{{ libvirt_bridge_name }}'/>
-      </network>
-    dest: "/tmp/{{ libvirt_network_name }}.xml"
-    mode: '0644'
-  when: network_info.failed | default(false)
+  changed_when: false
 
 - name: Define libvirt bridge network
   community.libvirt.virt_net:
     command: define
     name: "{{ libvirt_network_name }}"
-    xml: "{{ lookup('file', '/tmp/' + libvirt_network_name + '.xml') }}"
-  when: network_info.failed | default(false)
+    xml: |
+      <network>
+        <name>{{ libvirt_network_name }}</name>
+        <forward mode='bridge'/>
+        <bridge name='{{ libvirt_bridge_name }}'/>
+      </network>
+  when: network_check.rc != 0
 
-- name: Start and autostart libvirt network
+- name: Start libvirt network
   community.libvirt.virt_net:
     name: "{{ libvirt_network_name }}"
     state: active
-    autostart: true
 
-- name: Remove temporary network XML file
-  ansible.builtin.file:
-    path: "/tmp/{{ libvirt_network_name }}.xml"
-    state: absent
+- name: Enable autostart for libvirt network
+  ansible.builtin.command: virsh net-autostart {{ libvirt_network_name }}
+  register: net_autostart
+  changed_when: "'marked as autostarted' in net_autostart.stdout or 'autostart' in net_autostart.stdout"
+  failed_when: net_autostart.rc != 0 and 'already' not in net_autostart.stderr
 
 # Storage pool creation moved to setup_raid.yml
 # Dual pools created based on VM volume_mode requirements:

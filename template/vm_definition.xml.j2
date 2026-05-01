@@ -1,9 +1,21 @@
 <domain type='kvm'>
   <name>{{ vmname }}</name>
   <memory unit='MiB'>{{ memory }}</memory>
+  {% if vm.performance.vcpu_max is defined %}
+  <vcpu placement='static' current='{{ vcpu }}'>{{ vm.performance.vcpu_max }}</vcpu>
+  {% else %}
   <vcpu placement='static'>{{ vcpu }}</vcpu>
+  {% endif %}
 
-  <iothreads>1</iothreads>
+  {% if vm.performance.hugepages is defined and not vm.performance.hugepages %}
+  {# Huge pages explicitly disabled #}
+  {% else %}
+  <memoryBacking>
+    <hugepages/>
+  </memoryBacking>
+  {% endif %}
+
+  <iothreads>{{ vm.performance.iothread_count | default(1) }}</iothreads>
 
   <os>
     <type arch='x86_64' machine='pc'>hvm</type>
@@ -22,12 +34,18 @@
     </controller>
 
     {% set letters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] %}
+    {% set iothread_count = vm.performance.iothread_count | default(1) %}
     {% for item in disks %}
     {% set target_prefix = 'vd' if item.disk.bus == 'virtio' else 'sd' %}
     {% set target_dev = target_prefix + letters[loop.index0] %}
+    {% set iothread_id = ((loop.index0 % iothread_count) + 1) %}
 
     <disk type='{{ 'block' if item.disk.volume_mode == 'block' else 'file' }}' device='disk'>
+      {% if item.disk.bus == 'scsi' %}
+      <driver name='qemu' type='raw' cache='none' io='native' discard='unmap' iothread='{{ iothread_id }}'/>
+      {% else %}
       <driver name='qemu' type='raw' cache='none' io='native' discard='unmap'/>
+      {% endif %}
       {% if item.disk.volume_mode == 'block' %}
       <source dev='/dev/vg_nvme/{{ item.name }}'/>
       {% else %}
@@ -58,6 +76,9 @@
       <source network='{{ libvirt_network_name | default("libvirt_net1") }}'/>
       <mac address='{{ vm.network.mac }}'/>
       <model type='virtio'/>
+      <driver name='vhost' queues='{{ vm.performance.network_queues | default(2) }}'/>
     </interface>
+
+    <memballoon model='none'/>
   </devices>
 </domain>

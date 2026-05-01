@@ -23,7 +23,7 @@
   changed_when: true
 
 - name: Zero superblock on RAID devices
-  ansible.builtin.command: mdadm --zero-superblock /dev/{{ item }}
+  ansible.builtin.command: mdadm --zero-superblock {{ item }}
   loop: "{{ host.additional_disks }}"
   when:
     - raid_check.rc != 0 or force_raid_recreate | default(false)
@@ -38,7 +38,7 @@
     --chunk={{ raid_chunk_size }}
     --metadata={{ raid_metadata_version }}
     --assume-clean
-    {% for disk in host.additional_disks %}/dev/{{ disk }}{% if not loop.last %} {% endif %}{% endfor %}
+    {% for disk in host.additional_disks %}{{ disk }}{% if not loop.last %} {% endif %}{% endfor %}
   when: raid_check.rc != 0
   register: raid_create
   changed_when: true
@@ -134,8 +134,8 @@
 - name: Calculate block partition end
   ansible.builtin.set_fact:
     block_part_end: >-
-      {{ (lvm_vg_filesystem_size | regex_replace('T$', '') | int
-      + lvm_vg_block_size | regex_replace('T$', '') | int) | string + 'T'
+      {{ (lvm_vg_filesystem_size | regex_replace('TiB$', '') | int
+      + lvm_vg_block_size | regex_replace('TiB$', '') | int) | string + 'TiB'
       if uses_filesystem_mode
       else lvm_vg_block_size }}
 
@@ -235,11 +235,10 @@
   when: uses_filesystem_mode | bool
 
 - name: Check if filesystem storage pool exists
-  community.libvirt.virt_pool:
-    command: info
-    name: "{{ libvirt_pool_filesystem_name }}"
-  register: pool_fs_info
+  ansible.builtin.command: virsh pool-info {{ libvirt_pool_filesystem_name }}
+  register: pool_fs_check
   failed_when: false
+  changed_when: false
   when: uses_filesystem_mode | bool
 
 - name: Define libvirt filesystem storage pool
@@ -260,21 +259,19 @@
       </pool>
   when:
     - uses_filesystem_mode | bool
-    - pool_fs_info.failed | default(false)
+    - pool_fs_check.rc != 0
 
-- name: Build filesystem storage pool
-  community.libvirt.virt_pool:
-    command: build
-    name: "{{ libvirt_pool_filesystem_name }}"
-  when:
-    - uses_filesystem_mode | bool
-    - pool_fs_info.failed | default(false)
-
-- name: Start and autostart filesystem storage pool
+- name: Start filesystem storage pool
   community.libvirt.virt_pool:
     name: "{{ libvirt_pool_filesystem_name }}"
     state: active
-    autostart: true
+  when: uses_filesystem_mode | bool
+
+- name: Enable autostart for filesystem storage pool
+  ansible.builtin.command: virsh pool-autostart {{ libvirt_pool_filesystem_name }}
+  register: pool_fs_autostart
+  changed_when: "'marked as autostarted' in pool_fs_autostart.stdout or 'autostart' in pool_fs_autostart.stdout"
+  failed_when: pool_fs_autostart.rc != 0 and 'already' not in pool_fs_autostart.stderr
   when: uses_filesystem_mode | bool
 
 # =====================================================================
@@ -303,11 +300,10 @@
   when: uses_block_mode | bool
 
 - name: Check if block storage pool exists
-  community.libvirt.virt_pool:
-    command: info
-    name: "{{ libvirt_pool_block_name }}"
-  register: pool_block_info
+  ansible.builtin.command: virsh pool-info {{ libvirt_pool_block_name }}
+  register: pool_block_check
   failed_when: false
+  changed_when: false
   when: uses_block_mode | bool
 
 - name: Define libvirt block storage pool
@@ -327,21 +323,19 @@
       </pool>
   when:
     - uses_block_mode | bool
-    - pool_block_info.failed | default(false)
+    - pool_block_check.rc != 0
 
-- name: Build block storage pool
-  community.libvirt.virt_pool:
-    command: build
-    name: "{{ libvirt_pool_block_name }}"
-  when:
-    - uses_block_mode | bool
-    - pool_block_info.failed | default(false)
-
-- name: Start and autostart block storage pool
+- name: Start block storage pool
   community.libvirt.virt_pool:
     name: "{{ libvirt_pool_block_name }}"
     state: active
-    autostart: true
+  when: uses_block_mode | bool
+
+- name: Enable autostart for block storage pool
+  ansible.builtin.command: virsh pool-autostart {{ libvirt_pool_block_name }}
+  register: pool_block_autostart
+  changed_when: "'marked as autostarted' in pool_block_autostart.stdout or 'autostart' in pool_block_autostart.stdout"
+  failed_when: pool_block_autostart.rc != 0 and 'already' not in pool_block_autostart.stderr
   when: uses_block_mode | bool
 
 - name: Enable and start mdmonitor service
