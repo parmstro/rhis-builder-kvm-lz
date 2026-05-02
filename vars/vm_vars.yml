@@ -32,9 +32,9 @@ vms:
       lv_var_log_audit_mb: 6144
       lv_var_mb: 1
     disks:
-      - name: idm1_os1
+      - name: idm1_os1                       # OS disk naming: <vmname>_os<number> (validated against fs layout)
         disk:
-          capacity: 100
+          capacity: 100                      # Must be >= total fs layout (boot + boot_efi + all LVs + 5% overhead)
           bus: virtio
           volume_mode: filesystem
       - name: idm1_data1
@@ -84,9 +84,9 @@ vms:
       lv_var_log_audit_mb: 6144
       lv_var_mb: 1
     disks:
-      - name: web1_os1
+      - name: web1_os1                       # OS disk naming: <vmname>_os<number> (validated against fs layout)
         disk:
-          capacity: 50
+          capacity: 50                       # Must be >= total fs layout (boot + boot_efi + all LVs + 5% overhead)
           bus: virtio
           volume_mode: filesystem
       - name: web1_data1
@@ -136,9 +136,9 @@ vms:
       lv_var_log_audit_mb: 6144
       lv_var_mb: 1
     disks:
-      - name: db1_os1
+      - name: db1_os1                        # OS disk naming: <vmname>_os<number> (validated against fs layout)
         disk:
-          capacity: 100
+          capacity: 100                      # Must be >= total fs layout (boot + boot_efi + all LVs + 5% overhead)
           bus: virtio
           volume_mode: filesystem
       - name: db1_data1

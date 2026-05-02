@@ -1,0 +1,78 @@
+---
+# =====================================================================
+# --- VM State Check and Destruction ---
+# =====================================================================
+
+- name: "Check if VM exists: {{ vm.vmname }}"
+  community.libvirt.virt:
+    command: info
+  register: vm_info
+  failed_when: false
+  become: true
+
+- name: "Destroy running VM: {{ vm.vmname }}"
+  community.libvirt.virt:
+    name: "{{ vm.vmname }}"
+    state: destroyed
+  when: vm_info is succeeded and vm.vmname in vm_info
+  failed_when: false
+  become: true
+
+- name: "Undefine VM from libvirt: {{ vm.vmname }}"
+  community.libvirt.virt:
+    name: "{{ vm.vmname }}"
+    command: undefine
+  when: vm_info is succeeded and vm.vmname in vm_info
+  failed_when: false
+  become: true
+
+# =====================================================================
+# --- Storage Volume Removal ---
+# =====================================================================
+
+- name: "Remove filesystem-mode disk images: {{ vm.vmname }}"
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/{{ item.name }}.img"
+    state: absent
+  loop: "{{ vm.disks | selectattr('disk.volume_mode', 'equalto', 'filesystem') | list }}"
+  become: true
+
+- name: "Remove block-mode logical volumes: {{ vm.vmname }}"
+  community.general.lvol:
+    vg: "{{ lvm_vg_block_name }}"
+    lv: "{{ item.name }}"
+    state: absent
+    force: true
+  loop: "{{ vm.disks | selectattr('disk.volume_mode', 'equalto', 'block') | list }}"
+  failed_when: false
+  become: true
+
+# =====================================================================
+# --- Kickstart Artifacts Cleanup ---
+# =====================================================================
+
+- name: "Remove VM kickstart configuration: {{ vm.vmname }}"
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.cfg"
+    state: absent
+  become: true
+
+- name: "Remove VM kickstart USB image: {{ vm.vmname }}"
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img"
+    state: absent
+  become: true
+
+# =====================================================================
+# --- Temporary Files Cleanup ---
+# =====================================================================
+
+- name: "Remove temporary XML definition files: {{ vm.vmname }}"
+  ansible.builtin.file:
+    path: "/tmp/{{ vm.vmname }}{{ item }}.xml"
+    state: absent
+  delegate_to: localhost
+  loop:
+    - ""
+    - "-clean"
+...

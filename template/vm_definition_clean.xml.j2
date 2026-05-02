@@ -17,12 +17,12 @@
 
   <iothreads>{{ vm.performance.iothread_count | default(1) }}</iothreads>
   <os>
-    <type arch='x86_64' machine='pc'>hvm</type>
+    <type arch='x86_64' machine='q35'>hvm</type>
     <boot dev='hd'/>
   </os>
 
   <devices>
-    <emulator>/usr/bin/qemu-system-x86_64</emulator>
+    <emulator>/usr/libexec/qemu-kvm</emulator>
 
     <controller type='scsi' index='0' model='virtio-scsi'>
       <driver queues='{{ vcpu }}' iothread='1'/>
@@ -36,13 +36,9 @@
     {% set iothread_id = ((loop.index0 % iothread_count) + 1) %}
 
     <disk type='{{ 'block' if item.disk.volume_mode == 'block' else 'file' }}' device='disk'>
-      {% if item.disk.bus == 'scsi' %}
-      <driver name='qemu' type='raw' cache='none' io='native' discard='unmap' iothread='{{ iothread_id }}'/>
-      {% else %}
       <driver name='qemu' type='raw' cache='none' io='native' discard='unmap'/>
-      {% endif %}
       {% if item.disk.volume_mode == 'block' %}
-      <source dev='/dev/vg_nvme/{{ item.name }}'/>
+      <source dev='/dev/{{ lvm_vg_block_name }}/{{ item.name }}'/>
       {% else %}
       <source file='{{ libvirt_pool_filesystem_path }}/{{ item.name }}.img'/>
       {% endif %}
