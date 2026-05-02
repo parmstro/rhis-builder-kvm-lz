@@ -17,6 +17,13 @@
       ansible.builtin.debug:
         msg: "Deploying {{ host_vms | length }} VM(s) on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
 
+    - name: Validate OS disk capacity against filesystem layout
+      ansible.builtin.include_tasks: ../tasks/validate_os_disk.yml
+      loop: "{{ host_vms }}"
+      loop_control:
+        loop_var: vm
+      when: host_vms | length > 0
+
     - name: Deploy VMs assigned to this host
       ansible.builtin.include_tasks: ../tasks/vm_deploy_task.yml
       loop: "{{ host_vms }}"

@@ -15,15 +15,7 @@ selinux --enforcing
 keyboard us
 skipx
 
-network --device={{ vm.network.mac }} \
-        --hostname {{ vm.vmname }} \
-        --noipv6 \
-        --bootproto static \
-        --ip={{ vm.network.ipv4_address }} \
-        --netmask={{ vm.network.ipv4_netmask }} \
-        --gateway={{ vm.network.ipv4_gateway }} \
-        --mtu=1500 \
-        --nameserver={{ vm.network.name_server1 }},{{ vm.network.name_server2 }}
+network --device={{ vm.network.mac }} --hostname {{ vm.vmname }} --noipv6 --bootproto=static --ip={{ vm.network.ipv4_address }} --netmask={{ vm.network.ipv4_netmask }} --gateway={{ vm.network.ipv4_gateway }} --mtu=1500 --nameserver={{ vm.network.name_server1 }},{{ vm.network.name_server2 }}
 
 rootpw --iscrypted {{ vm.root_enc_pass }}
 firewall --service=ssh
@@ -109,26 +101,6 @@ logger "Performance: Guest IOMMU passthrough enabled (iommu.passthrough=1)"
 {% if vm.performance.guest_kernel_params is defined and vm.performance.guest_kernel_params != "" %}
 logger "Performance: Additional kernel parameters: {{ vm.performance.guest_kernel_params }}"
 {% endif %}
-
-# Network configuration - find interface by MAC address
-real=`grep -l {{ vm.network.mac }} /sys/class/net/*/{bonding_slave/perm_hwaddr,address} 2>/dev/null | awk -F '/' '// {print $5}' | head -1`
-
-nmcli con add type ethernet con-name "$real" ifname "$real" \
-    ipv4.method manual \
-    ipv4.addresses {{ (vm.network.ipv4_address ~ '/' ~ vm.network.ipv4_netmask) | ansible.utils.ipaddr('host/prefix') }} \
-    ipv4.gateway {{ vm.network.ipv4_gateway }} \
-    ipv4.dns "{{ vm.network.name_server1 }} {{ vm.network.name_server2 }}" \
-    ipv4.dns-search "{{ vm.network.domain }}" \
-    802-3-ethernet.cloned-mac-address "{{ vm.network.mac }}" \
-    802-3-ethernet.mtu 1500 \
-    connection.zone public \
-    connection.autoconnect yes \
-    ipv4.ignore-auto-dns no \
-    ipv4.ignore-auto-routes no \
-    ipv4.never-default no
-
-# Ensure reliable DNS for initial connectivity
-nmcli conn mod $real ipv4.dns 8.8.8.8,8.8.4.4 && sudo nmcli conn up $real
 
 # Provisioner user for Ansible automation
 useradd -G wheel {{ vm.username }} -p '{{ vm.user_enc_pass }}'

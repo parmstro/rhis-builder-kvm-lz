@@ -109,10 +109,14 @@
   failed_when: false
   changed_when: false
 
+- name: Detect if partitions already exist on RAID array
+  ansible.builtin.set_fact:
+    raid_has_partitions: "{{ partition_check.rc == 0 and 'Number' in partition_check.stdout }}"
+
 - name: Create GPT partition table on RAID array
   ansible.builtin.command: parted -s /dev/{{ raid_name }} mklabel gpt
   when:
-    - "'Partition Table: gpt' not in partition_check.stdout"
+    - not raid_has_partitions | bool
     - uses_filesystem_mode | bool or uses_block_mode | bool
   changed_when: true
 

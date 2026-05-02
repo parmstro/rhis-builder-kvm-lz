@@ -209,15 +209,17 @@ This project implements IBM KVM performance best practices at both the hyperviso
 │   ├── bare_metal_deploy_install.yml            # Phase 2: Boot and install OS
 │   ├── kvm_host_configure.yml                   # Phase 3: Configure RAID/libvirt/ISO
 │   ├── verify_raid_capability.yml               # Standalone: Verify RAID capability
-│   └── deploy_vm.yml                            # Phase 4: Deploy VMs with kickstart
+│   ├── deploy_vm.yml                            # Phase 4: Deploy VMs with kickstart
+│   └── remove_vm.yml                            # Utility: Remove VMs and storage
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml     # Per-host kickstart/image generation
 │   ├── detect_nvme_raid_devices.yml             # NVMe device auto-detection and RAID verification
 │   ├── setup_raid.yml                           # RAID 10 configuration tasks
 │   ├── setup_libvirt.yml                        # Libvirt infrastructure tasks
 │   ├── distribute_iso.yml                       # RHEL ISO distribution to hypervisors
-│   ├── vm_kickstart_prep.yml                    # VM kickstart config and USB image generation
-│   └── vm_deploy_task.yml                       # VM deployment tasks
+│   ├── validate_os_disk.yml                     # OS disk capacity validation against filesystem layout
+│   ├── vm_deploy_task.yml                       # VM deployment tasks (includes kickstart prep)
+│   └── vm_remove_task.yml                       # VM removal tasks (cleanup storage)
 ├── vars/
 │   └── vm_vars.yml                              # VM definitions with network config
 └── template/
@@ -296,6 +298,18 @@ This project implements IBM KVM performance best practices at both the hyperviso
    - Each host deploys only VMs with matching `target_host`
    - Can deploy to specific host: `ansible-playbook playbooks/deploy_vm.yml --limit infra1`
 
+**Pre-Deployment Validation:**
+
+The playbook performs automatic validation before deployment begins:
+
+- **OS Disk Capacity Check**: For disks named with `_os` pattern (e.g., `idm1_os1`), validates that disk capacity is sufficient for the defined filesystem layout
+- **Calculation**: Sums all filesystem sizes from `fs` section (boot, boot_efi, LV sizes), adds 5% LVM overhead, converts to GB
+- **Special handling**: `lv_var_mb: 1` (use remaining space) is treated as 0 for validation purposes
+- **Fail-fast**: If capacity is insufficient, playbook exits with detailed error message showing:
+  - Current disk capacity vs. required capacity
+  - Breakdown of all filesystem allocations
+  - Specific action needed (increase disk or reduce filesystems)
+
 **Automated Kickstart Installation Workflow:**
 1. Create disk volumes (qemu-img for filesystem mode, LVM for block mode)
 2. Generate per-VM kickstart configuration from template (`vm_ks.cfg.j2`)
@@ -307,6 +321,29 @@ This project implements IBM KVM performance best practices at both the hyperviso
 8. Wait for SSH availability (timeout: 60 minutes)
 9. Shutdown VM and redefine without installation media
 10. Restart VM with autostart enabled for production use
+
+### VM Removal (Development/Troubleshooting)
+
+For rapid iteration during development or troubleshooting deployment issues:
+
+1. Validate syntax: `ansible-lint playbooks/remove_vm.yml`
+2. Remove VMs: `ansible-playbook playbooks/remove_vm.yml`
+   - Runs on all `infra_servers`
+   - Each host removes only VMs with matching `target_host`
+   - Can remove from specific host: `ansible-playbook playbooks/remove_vm.yml --limit infra1`
+
+**Removal Operations (in order):**
+1. Check VM state and destroy if running (forced shutdown)
+2. Undefine VM from libvirt
+3. Remove filesystem-mode disk images (`.img` files)
+4. Remove block-mode logical volumes from `{{ lvm_vg_block_name }}`
+5. Remove kickstart configuration and USB image files
+6. Clean up temporary XML definition files
+
+**Notes:**
+- All operations are idempotent - safe to run even if VM doesn't exist
+- No confirmation prompts - playbook execution is the confirmation
+- Storage is permanently deleted - use with caution in production
 
 ## Additional Context
 

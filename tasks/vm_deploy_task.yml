@@ -32,8 +32,58 @@
 # --- Kickstart Generation ---
 # =====================================================================
 
-- name: Include VM kickstart preparation tasks
-  ansible.builtin.include_tasks: vm_kickstart_prep.yml
+- name: Ensure kickstart directory exists in filesystem pool
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+  become: true
+
+- name: Generate VM kickstart configuration from template
+  ansible.builtin.template:
+    src: ../template/vm_ks.cfg.j2
+    dest: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.cfg"
+    mode: '0644'
+    owner: root
+    group: root
+  become: true
+
+- name: Create empty 10MB image file for VM kickstart
+  ansible.builtin.command: >
+    dd if=/dev/zero
+    of={{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+    bs=1M count=10
+  changed_when: true
+  become: true
+
+- name: Format the image file as FAT32 with label OEMDRV
+  ansible.builtin.command: >
+    mkfs.vfat -F 32 -n OEMDRV
+    {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+  changed_when: true
+  become: true
+
+- name: Copy ks.cfg into the FAT32 image using mcopy
+  ansible.builtin.command: >
+    mcopy -i {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.img
+    {{ libvirt_pool_filesystem_path }}/kickstart/{{ vm.vmname }}-ks.cfg
+    ::/ks.cfg
+  changed_when: true
+  become: true
+
+- name: Set correct ownership and SELinux context for kickstart files
+  ansible.builtin.file:
+    path: "{{ libvirt_pool_filesystem_path }}/kickstart/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+    setype: virt_image_t
+  loop:
+    - "{{ vm.vmname }}-ks.cfg"
+    - "{{ vm.vmname }}-ks.img"
+  become: true
 
 # =====================================================================
 # --- VM Definition and Installation ---
@@ -44,6 +94,7 @@
     src: ../template/vm_definition.xml.j2
     dest: "/tmp/{{ vm.vmname }}.xml"
     mode: '0644'
+  delegate_to: localhost
   vars:
     vmname: "{{ vm.vmname }}"
     vcpu: "{{ vm.vcpu }}"
@@ -54,18 +105,20 @@
   community.libvirt.virt:
     command: define
     xml: "{{ lookup('file', '/tmp/' + vm.vmname + '.xml') }}"
+  become: true
 
 - name: "Start VM for kickstart installation: {{ vm.vmname }}"
   community.libvirt.virt:
     name: "{{ vm.vmname }}"
     state: running
     autostart: false
+  become: true
 
 # =====================================================================
 # --- Wait for Installation Completion ---
 # =====================================================================
 
-- name: "Wait for {{ vm.vmname }} to become reachable via SSH"
+- name: "Wait for VM to become reachable via SSH: {{ vm.vmname }}"
   ansible.builtin.wait_for:
     host: "{{ vm.network.ipv4_address }}"
     port: 22
@@ -78,12 +131,13 @@
 # --- Post-Install VM Cleanup ---
 # =====================================================================
 
-- name: "Shutdown {{ vm.vmname }} to detach installation media"
+- name: "Shutdown VM to detach installation media: {{ vm.vmname }}"
   community.libvirt.virt:
     name: "{{ vm.vmname }}"
     state: shutdown
+  become: true
 
-- name: "Wait for {{ vm.vmname }} to shut down completely"
+- name: "Wait for VM to shut down completely: {{ vm.vmname }}"
   ansible.builtin.wait_for:
     timeout: 60
   delegate_to: localhost
@@ -93,6 +147,7 @@
     src: ../template/vm_definition_clean.xml.j2
     dest: "/tmp/{{ vm.vmname }}-clean.xml"
     mode: '0644'
+  delegate_to: localhost
   vars:
     vmname: "{{ vm.vmname }}"
     vcpu: "{{ vm.vcpu }}"
@@ -103,17 +158,20 @@
   community.libvirt.virt:
     command: define
     xml: "{{ lookup('file', '/tmp/' + vm.vmname + '-clean.xml') }}"
+  become: true
 
 - name: "Start VM in production mode: {{ vm.vmname }}"
   community.libvirt.virt:
     name: "{{ vm.vmname }}"
     state: running
     autostart: true
+  become: true
 
 - name: "Clean up temporary XML files: {{ vm.vmname }}"
   ansible.builtin.file:
     path: "/tmp/{{ vm.vmname }}{{ item }}.xml"
     state: absent
+  delegate_to: localhost
   loop:
     - ""
     - "-clean"

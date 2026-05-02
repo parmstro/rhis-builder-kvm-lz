@@ -1,0 +1,26 @@
+---
+- name: Remove KVM VMs and Storage
+  hosts: infra_servers
+  become: true
+  vars_files:
+    - ../vars/vm_vars.yml
+  tasks:
+    - name: Ensure the community.libvirt collection is installed
+      ansible.builtin.command: ansible-galaxy collection install community.libvirt
+      changed_when: false
+
+    - name: Filter VMs for this host
+      ansible.builtin.set_fact:
+        host_vms: "{{ vms | selectattr('target_host', 'equalto', inventory_hostname) | list }}"
+
+    - name: Display VMs to remove on this host
+      ansible.builtin.debug:
+        msg: "Removing {{ host_vms | length }} VM(s) on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
+
+    - name: Remove VMs assigned to this host
+      ansible.builtin.include_tasks: ../tasks/vm_remove_task.yml
+      loop: "{{ host_vms }}"
+      loop_control:
+        loop_var: vm
+      when: host_vms | length > 0
+...
