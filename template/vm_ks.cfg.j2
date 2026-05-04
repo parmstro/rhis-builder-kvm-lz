@@ -115,8 +115,12 @@ cat >> /etc/sudoers.d/{{ vm.username }} <<EOF
 {{ vm.user_sudoer_policy }}
 EOF
 
+# Add all VMs from vm_vars.yml to /etc/hosts
 cat >> /etc/hosts <<EOF
-{{ vm.network.hostname }}.{{ vm.network.domain }}    {{ vm.network.ipv4_address }}
+# Virtual machines
+{% for vm_entry in vms %}
+{{ vm_entry.network.ipv4_address }}    {{ vm_entry.vmname }} {{ vm_entry.network.hostname }}
+{% endfor %}
 EOF
 
 # Red Hat subscription registration
