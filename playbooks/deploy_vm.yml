@@ -1,13 +1,14 @@
 ---
 - name: Deploy KVM VMs with NVMe Performance Tuning
   hosts: infra_servers
-  become: true
+  become: false
   vars_files:
     - ../vars/vm_vars.yml
   tasks:
     - name: Ensure the community.libvirt collection is installed
       ansible.builtin.command: ansible-galaxy collection install community.libvirt
       changed_when: false
+      delegate_to: localhost
 
     - name: Filter VMs for this host
       ansible.builtin.set_fact:
@@ -15,19 +16,68 @@
 
     - name: Display VMs to deploy on this host
       ansible.builtin.debug:
-        msg: "Deploying {{ host_vms | length }} VM(s) on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
+        msg: "Deploying {{ host_vms | length }} VM(s) in parallel on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
 
-    - name: Validate OS disk capacity against filesystem layout
-      ansible.builtin.include_tasks: ../tasks/validate_os_disk.yml
-      loop: "{{ host_vms }}"
-      loop_control:
-        loop_var: vm
+    - name: Ensure logs directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../logs"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
       when: host_vms | length > 0
 
-    - name: Deploy VMs assigned to this host
-      ansible.builtin.include_tasks: ../tasks/vm_deploy_task.yml
+    - name: Deploy VMs assigned to this host in parallel
+      ansible.builtin.shell: >
+        ansible-playbook
+        playbooks/deploy_single_vm.yml
+        -i {{ inventory_file }}
+        -e target_host={{ inventory_hostname }}
+        -e vm_to_deploy={{ item.vmname }}
+        > logs/rhis_builder_kvm_lz_demo_{{ item.vmname }}_prov.txt 2>&1
+      args:
+        chdir: "{{ playbook_dir }}/.."
+        executable: /bin/bash
       loop: "{{ host_vms }}"
-      loop_control:
-        loop_var: vm
+      async: 7200
+      poll: 0
+      register: vm_deploy_jobs
+      delegate_to: localhost
+      when: host_vms | length > 0
+
+    - name: Wait for all VM deployments to complete
+      ansible.builtin.async_status:
+        jid: "{{ item.ansible_job_id }}"
+      loop: "{{ vm_deploy_jobs.results }}"
+      register: vm_deploy_results
+      until: vm_deploy_results.finished
+      retries: 360
+      delay: 20
+      delegate_to: localhost
+      when: host_vms | length > 0
+
+    - name: Build deployment summary message
+      ansible.builtin.set_fact:
+        deployment_summary: |
+          ==========================================
+          VM Deployment Complete on {{ inventory_hostname }}
+          ==========================================
+          Total VMs deployed: {{ host_vms | length }}
+
+          VMs and their deployment logs:
+          {% for vm in host_vms %}
+            - {{ vm.vmname }}
+              Log: logs/rhis_builder_kvm_lz_demo_{{ vm.vmname }}_prov.txt
+          {% endfor %}
+
+          To view logs:
+          {% for vm in host_vms %}
+            tail -f logs/rhis_builder_kvm_lz_demo_{{ vm.vmname }}_prov.txt
+          {% endfor %}
+          ==========================================
+      when: host_vms | length > 0
+
+    - name: Display deployment completion summary
+      ansible.builtin.debug:
+        msg: "{{ deployment_summary }}"
       when: host_vms | length > 0
 ...

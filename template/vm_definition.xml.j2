@@ -56,6 +56,7 @@
       {% if item.disk.bus == 'scsi' %}
       <address type='drive' controller='0' bus='0' target='0' unit='{{ loop.index0 }}'/>
       {% endif %}
+      <boot order='1'/>
     </disk>
     {% endfor %}
     <disk type='file' device='cdrom'>
@@ -64,7 +65,7 @@
       <backingStore/>
       <target dev='sdb' bus='sata'/>
       <readonly/>
-      <boot order='1'/>
+      <boot order='2'/>
       <alias name='sata0-0-1'/>
       <address type='drive' controller='0' bus='0' target='0' unit='1'/>
     </disk>
@@ -182,7 +183,7 @@
     </controller>
     <interface type='bridge'>
       <mac address='{{ vm.network.mac }}'/>
-      <source network='{{ libvirt_network_name | default("libvirt_net1") }}' bridge='br1'/>
+      <source network='{{ libvirt_network_name | default("libvirt_net1") }}' bridge='{{ libvirt_bridge_name }}'/>
       <target dev='vnet1'/>
       <model type='virtio'/>
       <driver name='vhost' queues='{{ vm.performance.network_queues | default(2) }}'/>

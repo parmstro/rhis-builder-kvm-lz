@@ -128,51 +128,20 @@
   delegate_to: localhost
 
 # =====================================================================
-# --- Post-Install VM Cleanup ---
+# --- Post-Install VM Configuration ---
 # =====================================================================
+# Note: reboot --eject in kickstart automatically ejects CD-ROM before reboot
+# VM will boot from HDD on next boot without manual intervention
 
-- name: "Shutdown VM to detach installation media: {{ vm.vmname }}"
+- name: "Enable autostart for VM: {{ vm.vmname }}"
   community.libvirt.virt:
     name: "{{ vm.vmname }}"
-    state: shutdown
-  become: true
-
-- name: "Wait for VM to shut down completely: {{ vm.vmname }}"
-  ansible.builtin.wait_for:
-    timeout: 60
-  delegate_to: localhost
-
-- name: "Template clean VM XML definition: {{ vm.vmname }}"
-  ansible.builtin.template:
-    src: ../template/vm_definition_clean.xml.j2
-    dest: "/tmp/{{ vm.vmname }}-clean.xml"
-    mode: '0644'
-  delegate_to: localhost
-  vars:
-    vmname: "{{ vm.vmname }}"
-    vcpu: "{{ vm.vcpu }}"
-    memory: "{{ vm.memory }}"
-    disks: "{{ vm.disks }}"
-
-- name: "Redefine VM without installation media: {{ vm.vmname }}"
-  community.libvirt.virt:
-    command: define
-    xml: "{{ lookup('file', '/tmp/' + vm.vmname + '-clean.xml') }}"
-  become: true
-
-- name: "Start VM in production mode: {{ vm.vmname }}"
-  community.libvirt.virt:
-    name: "{{ vm.vmname }}"
-    state: running
     autostart: true
   become: true
 
-- name: "Clean up temporary XML files: {{ vm.vmname }}"
+- name: "Clean up temporary XML file: {{ vm.vmname }}"
   ansible.builtin.file:
-    path: "/tmp/{{ vm.vmname }}{{ item }}.xml"
+    path: "/tmp/{{ vm.vmname }}.xml"
     state: absent
   delegate_to: localhost
-  loop:
-    - ""
-    - "-clean"
 ...
