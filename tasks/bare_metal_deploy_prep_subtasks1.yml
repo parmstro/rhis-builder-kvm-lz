@@ -19,6 +19,9 @@
   changed_when: true
 
 - name: Copy ks.cfg into the local FAT32 image using mcopy for each host
-  ansible.builtin.command: mcopy -i {{ local_workspace }}/{{ hostvars[item].host.hostname }}-{{ img_filename }} {{ local_workspace }}/ks-{{ hostvars[item].host.hostname }}.cfg ::/ks.cfg
+  ansible.builtin.command: >
+    mcopy -i {{ local_workspace }}/{{ hostvars[item].host.hostname }}-{{ img_filename }}
+    {{ local_workspace }}/ks-{{ hostvars[item].host.hostname }}.cfg
+    ::/ks.cfg
   changed_when: true
 ...

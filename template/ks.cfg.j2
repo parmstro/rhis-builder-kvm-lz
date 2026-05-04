@@ -187,8 +187,16 @@ cat >> /etc/sudoers.d/{{ host.username }} <<EOF
 {{ host.user_sudoer_policy }}
 EOF
 
+# Add all VMs from vm_vars.yml to /etc/hosts
 cat >> /etc/hosts <<EOF
-{{ host.hostname }}.{{ host.domain }}    {{ host.ipv4_address }}
+# Hypervisor hosts
+{{ host.ipv4_address }}    {{ host.hostname }}.{{ host.domain }} {{ host.hostname }}
+{% if vms is defined %}
+# Virtual machines
+{% for vm in vms %}
+{{ vm.network.ipv4_address }}    {{ vm.vmname }} {{ vm.network.hostname }}
+{% endfor %}
+{% endif %}
 EOF
 
 subscription-manager register --org={{ host.org }} --activationkey={{ host.activation_key }}

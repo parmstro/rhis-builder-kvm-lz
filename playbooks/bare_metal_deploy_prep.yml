@@ -2,6 +2,8 @@
 - name: Prepare Virtual Media for Kickstart Installation
   hosts: localhost
   gather_facts: false
+  vars_files:
+    - ../vars/vm_vars.yml
 
   tasks:
     # =====================================================================
