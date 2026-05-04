@@ -7,9 +7,16 @@ raid_metadata_version: "1.2"
 
 # LVM Configuration
 lvm_vg_filesystem_name: "vg_nvme_fs"
-lvm_vg_filesystem_size: "1TiB"
 lvm_vg_block_name: "vg_nvme_block"
-lvm_vg_block_size: "2TiB"
+
+# RAID to LVM allocation percentages
+# Note: filesystem_percent + block_percent + overhead_percent must not exceed 100
+lvm_vg_filesystem_percent: 15      # % of md0 for filesystem pool
+lvm_vg_block_percent: 80           # % of md0 for block pool
+lvm_overhead_percent: 5            # % reserved for LVM metadata overhead
+
+# Snapshot reserve within each VG (percentage of VG capacity left unallocated)
+lvm_snapshot_reserve_percent: 15   # % of each VG reserved for snapshots
 
 # Libvirt Storage Pools
 libvirt_pool_filesystem_name: "nvme_pool_fs"

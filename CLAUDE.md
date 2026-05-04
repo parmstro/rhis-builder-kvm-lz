@@ -66,12 +66,17 @@ This project follows the [Red Hat COP Automation Good Practices](https://redhat-
     - Fallback to `host.additional_disks` from host_vars if no Dell DC NVMe found or variable already set
     - Playbook fails fast if fewer than 4 disks available
   - Dual Storage Pool Architecture:
-    - RAID array partitioned based on VM volume_mode requirements
-    - **Filesystem Pool** (volume_mode: filesystem): 1TiB LVM partition with XFS, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
-    - **Block Pool** (volume_mode: block): 1TiB LVM volume group, libvirt pool type `logical` for direct block access
-    - VM definitions in `vars/vm_vars.yml` determine which pools are created
-    - Each pool created only if corresponding volume_mode is defined in VM disks
-    - Partition sizes use TiB (binary) units for parted compatibility
+    - RAID array partitioned using percentage-based allocation (both pools always created)
+    - **Filesystem Pool** (volume_mode: filesystem): Percentage-based LVM partition with XFS, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
+    - **Block Pool** (volume_mode: block): Percentage-based LVM volume group, libvirt pool type `logical` for direct block access
+    - Partition allocation percentages configured in `inventory/group_vars/infra_servers.yml`:
+      - `lvm_vg_filesystem_percent`: Percentage of RAID for filesystem pool (default: 15%)
+      - `lvm_vg_block_percent`: Percentage of RAID for block pool (default: 80%)
+      - `lvm_overhead_percent`: Reserved for LVM metadata overhead (default: 5%)
+      - `lvm_snapshot_reserve_percent`: Unallocated space within each VG for snapshots (default: 15%)
+    - Validation ensures `filesystem_percent + block_percent + overhead_percent ≤ 100%`
+    - Partition sizes calculated dynamically from RAID size at deployment time
+    - Snapshot reserve: Filesystem pool LV uses `(100 - lvm_snapshot_reserve_percent)%VG`, block pool leaves space for individual VM disk LVs
 - **Network Configuration**:
   - Primary NIC: Configured during kickstart (identified by MAC address)
   - Libvirt bridge: Configured on second NIC with active link
@@ -209,7 +214,8 @@ This project implements IBM KVM performance best practices at both the hyperviso
 │   ├── bare_metal_deploy_install.yml            # Phase 2: Boot and install OS
 │   ├── kvm_host_configure.yml                   # Phase 3: Configure RAID/libvirt/ISO
 │   ├── verify_raid_capability.yml               # Standalone: Verify RAID capability
-│   ├── deploy_vm.yml                            # Phase 4: Deploy VMs with kickstart
+│   ├── deploy_vm.yml                            # Phase 4: Deploy VMs in parallel (orchestrator)
+│   ├── deploy_single_vm.yml                     # Phase 4: Deploy single VM (worker)
 │   └── remove_vm.yml                            # Utility: Remove VMs and storage
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml     # Per-host kickstart/image generation
@@ -222,11 +228,13 @@ This project implements IBM KVM performance best practices at both the hyperviso
 │   └── vm_remove_task.yml                       # VM removal tasks (cleanup storage)
 ├── vars/
 │   └── vm_vars.yml                              # VM definitions with network config
+├── logs/                                        # VM deployment logs (auto-created, gitignored)
+│   └── rhis_builder_kvm_lz_demo_<vmname>_prov.txt
 └── template/
     ├── ks.cfg.j2                                # Kickstart template (bare metal)
-    ├── vm_ks.cfg.j2                             # Kickstart template (VMs)
+    ├── vm_ks.cfg.j2                             # Kickstart template (VMs) - uses reboot --eject
     ├── vm_definition.xml.j2                     # Libvirt VM XML template (with install media)
-    └── vm_definition_clean.xml.j2               # Libvirt VM XML template (post-install)
+    └── vm_definition_clean.xml.j2               # Libvirt VM XML template (reference only, not actively used)
 ```
 
 ## Deployment Workflow
@@ -292,10 +300,10 @@ This project implements IBM KVM performance best practices at both the hyperviso
 
 1. Define VMs in `vars/vm_vars.yml` with `target_host` assignments and network configuration
 2. Validate syntax: `ansible-lint playbooks/deploy_vm.yml`
-3. Check mode test: `ansible-playbook playbooks/deploy_vm.yml --check`
-4. Deploy VMs: `ansible-playbook playbooks/deploy_vm.yml`
+3. Deploy VMs: `ansible-playbook playbooks/deploy_vm.yml`
    - Playbook runs on all `infra_servers`
    - Each host deploys only VMs with matching `target_host`
+   - **VMs deploy in parallel on each hypervisor** (up to 2 hour timeout per VM)
    - Can deploy to specific host: `ansible-playbook playbooks/deploy_vm.yml --limit infra1`
 
 **Pre-Deployment Validation:**
@@ -315,12 +323,40 @@ The playbook performs automatic validation before deployment begins:
 2. Generate per-VM kickstart configuration from template (`vm_ks.cfg.j2`)
 3. Create FAT32 USB image with OEMDRV label containing kickstart file
 4. Define VM with CD-ROM (RHEL ISO) and USB (kickstart image) devices
-5. Start VM with boot order: CD-ROM first, then HDD
-6. VM boots from ISO and auto-detects kickstart from USB OEMDRV label
-7. Automated OS installation with static network, compliance LVM layout, and provisioner user
-8. Wait for SSH availability (timeout: 60 minutes)
-9. Shutdown VM and redefine without installation media
-10. Restart VM with autostart enabled for production use
+5. Start VM with boot order: HDD first (order='1'), CD-ROM second (order='2')
+   - Ensures VM boots from HDD after installation regardless of CD-ROM eject status
+   - Provides hardware-level safeguard against boot loops
+6. VM boots from ISO on first boot (HDD empty, falls through to CD-ROM)
+7. Auto-detects kickstart from USB OEMDRV label
+8. Automated OS installation with static network, compliance LVM layout, and provisioner user
+9. Kickstart completes with `reboot --eject`, ejecting CD-ROM before reboot
+10. VM reboots and boots from HDD (CD-ROM ejected, boot order ensures HDD priority)
+11. Wait for SSH availability (timeout: 60 minutes)
+12. Enable autostart for production use
+13. Deployment logs written to `logs/rhis_builder_kvm_lz_demo_<vmname>_prov.txt`
+
+**Monitoring Parallel Deployments:**
+
+Since VMs deploy in parallel, you can monitor individual deployment progress via log files:
+
+```bash
+# Monitor specific VM deployment in real-time
+tail -f logs/rhis_builder_kvm_lz_demo_idm1.flightpath.test_prov.txt
+
+# Check status of all VM deployments
+ls -lht logs/
+
+# Search for errors across all deployments
+grep -i error logs/*.txt
+
+# View deployment completion summary (displayed at end of playbook run)
+# Lists all deployed VMs and their log file paths
+```
+
+After deployment completes, the playbook displays a summary showing:
+- Total VMs deployed on each hypervisor
+- Each VM name with its specific log file path
+- Copy-paste ready tail commands for log viewing
 
 ### VM Removal (Development/Troubleshooting)
 
@@ -382,7 +418,7 @@ For rapid iteration during development or troubleshooting deployment issues:
 - **I/O threads**: More is not always better; start with 1 and increase only for high-I/O workloads
 - **Network queues**: Should not exceed vCPU count; 2 is optimal for most workloads
 - **CPU scheduler tuning**: The `kernel.sched_migration_cost_ns` parameter is optional and may not exist on all kernel versions; playbook handles gracefully
-- **Partition sizes**: Use TiB (binary, 1024-based) units for parted, not TB (decimal, 1000-based)
+- **Partition sizes**: Calculated dynamically from percentage allocation; parted uses GiB units (binary, 1024-based)
 - **ISO distribution**: Large ISO files (9.9 GB) are downloaded directly from HTTP server to avoid Ansible temp directory space issues
 
 **References:**

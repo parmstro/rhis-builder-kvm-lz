@@ -200,7 +200,12 @@ systemctl enable --now chronyd
 
 
 dnf -y update
-  
+
+echo "Enabling and starting cockpit service"
+systemctl enable --now cockpit.socket
+firewall-cmd --permanent --add-service=cockpit
+firewall-cmd --reload
+
 chvt 1
 ) 2>&1 | tee /root/install.post.log
 

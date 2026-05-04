@@ -16,9 +16,11 @@ This project provides a complete automation stack for deploying KVM hypervisor i
 - **Dell BOSS Auto-Detection**: Kickstart automatically detects and uses Dell BOSS devices for OS installation
 - **Dell DC NVMe Auto-Detection**: RAID setup automatically identifies Dell DC NVMe SSDs using disk/by-id paths
 - **NVMe RAID 10**: Automated mdadm RAID 10 configuration with auto-detected or configured NVMe disks
+- **Percentage-Based Storage Allocation**: Dynamic RAID partitioning with configurable percentages and snapshot reserves
 - **Compliance-Focused**: Partitioning scheme meets DISA-STIG, CIS, PCI-DSS requirements
 - **Disk-by-ID Naming**: Stable device references using `/dev/disk/by-id/`
 - **Bridge Networking**: Libvirt bridge mode on secondary NIC with active link detection
+- **Cockpit Web Console**: Automatically enabled for web-based management at port 9090
 - **Performance Tuned**: IBM KVM best practices implemented
   - Host: tuned virtual-host profile, huge pages, KVM module tuning, CPU scheduler optimization
   - VM: virtio-scsi, I/O threads, multi-queue networking, huge pages backing, direct I/O
@@ -188,7 +190,11 @@ This playbook uses a localhost-based orchestration pattern:
 3. Servers boot from virtual CD and begin kickstart installation
 4. Kickstart %pre phase detects Dell BOSS device for OS installation (if present)
 5. Dynamically generates partition commands based on detected hardware
-6. Waits for OS installation and SSH availability (up to 60 minutes)
+6. Automated OS installation includes:
+   - Red Hat subscription registration
+   - System updates
+   - Cockpit web console enabled and started (accessible at https://host:9090)
+7. Waits for OS installation and SSH availability (up to 60 minutes)
 
 #### Phase 2: KVM Host Configuration
 
@@ -203,13 +209,17 @@ ansible-playbook playbooks/kvm_host_configure.yml
 3. Auto-detects Dell DC NVMe SSD devices and populates `host.additional_disks` if not defined
 4. Verifies minimum 4 disks available for RAID 10 (fails fast if insufficient)
 5. Creates mdadm RAID 10 on detected/configured NVMe disks
-6. Loads VM definitions from `vars/vm_vars.yml` to detect storage requirements
-7. Partitions RAID array (using TiB units) based on volume_mode requirements:
-   - Partition 1 (1TiB): Filesystem pool (if any VM uses `volume_mode: filesystem`)
-   - Partition 2 (1TiB): Block pool (if any VM uses `volume_mode: block`)
+6. Queries RAID array size and calculates partition sizes based on percentages:
+   - Default: 15% filesystem pool, 80% block pool, 5% LVM overhead
+   - Validates total allocation ≤ 100%
+   - Displays calculated sizes in GiB for transparency
+7. Partitions RAID array with GPT partition table:
+   - Partition 1: Filesystem pool (percentage-based, calculated in GiB)
+   - Partition 2: Block pool (percentage-based, calculated in GiB)
+   - Both partitions always created
 8. Creates LVM infrastructure and libvirt storage pools:
-   - **Filesystem pool**: XFS on LVM, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, pool type `dir`
-   - **Block pool**: LVM volume group, pool type `logical` for direct block device access
+   - **Filesystem pool**: XFS on LVM with snapshot reserve, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, pool type `dir`
+   - **Block pool**: LVM volume group with snapshot reserve, pool type `logical` for direct block device access
 9. Detects secondary NIC and configures bridge:
    - Removes existing connections (including DHCP) from physical interface
    - Creates bridge with IPv4/IPv6 disabled (no IP address)
@@ -252,36 +262,55 @@ ansible-playbook playbooks/deploy_vm.yml
 
 **What happens:**
 1. Each hypervisor filters VMs by `target_host`
-2. Creates disk volumes (qemu-img for filesystem mode, LVM for block mode)
-3. Generates per-VM kickstart configuration from template
-4. Creates FAT32 USB image (10MB) with OEMDRV label containing kickstart file
-5. Stores kickstart artifacts in filesystem pool: `/mnt/md0/libvirt/filesystem/kickstart/`
-6. Templates libvirt XML with:
+2. **All VMs on each hypervisor deploy in parallel** (async execution, up to 2 hour timeout per VM)
+3. For each VM in parallel:
+   - Creates disk volumes (qemu-img for filesystem mode, LVM for block mode)
+   - Generates per-VM kickstart configuration from template
+   - Creates FAT32 USB image (10MB) with OEMDRV label containing kickstart file
+   - Stores kickstart artifacts in filesystem pool: `/mnt/md0/libvirt/filesystem/kickstart/`
+4. Templates libvirt XML with:
    - CD-ROM device pointing to RHEL ISO
    - USB disk device pointing to kickstart image
-   - Boot order: CD-ROM first, then HDD
+   - Boot order: HDD first (order='1'), CD-ROM second (order='2')
+   - Ensures VM boots from HDD after installation regardless of CD-ROM eject status
    - Performance tuning (virtio-scsi, IO threads)
    - Network interface with specified MAC address
-7. Defines and starts VM for installation
-8. VM boots from CD-ROM, auto-detects kickstart from USB OEMDRV label
-9. Automated OS installation proceeds:
+5. Defines and starts VM for installation
+6. VM boots from ISO on first boot (HDD empty, falls through to CD-ROM)
+7. Auto-detects kickstart from USB OEMDRV label
+8. Automated OS installation proceeds:
    - Static network configuration
    - Compliance-focused LVM partitioning
    - Provisioner user creation
    - Red Hat subscription registration
    - System updates
+   - Cockpit web console enabled and started (accessible at https://vm-ip:9090)
+   - Kickstart completes with `reboot --eject` (ejects CD-ROM before reboot)
+9. VM reboots and boots from HDD (CD-ROM ejected, boot order ensures HDD priority)
 10. Waits for SSH availability (timeout: 60 minutes)
-11. Shuts down VM and redefines without installation media
-12. Restarts VM with autostart enabled for production use
+11. Enables autostart for production use
+12. Deployment logs written to `logs/rhis_builder_kvm_lz_demo_<vmname>_prov.txt`
+13. All VMs on hypervisor complete in parallel (faster than serial deployment)
 
-**Monitor installation progress:**
+**Monitor parallel deployments:**
 ```bash
-# Watch VM console during installation
+# Monitor specific VM deployment in real-time
+tail -f logs/rhis_builder_kvm_lz_demo_idm1.domain.test_prov.txt
+
+# Check status of all VM deployments
+ls -lht logs/
+
+# Search for errors across all deployments
+grep -i error logs/*.txt
+
+# Watch VM console during installation (alternative)
 ssh infra1 "virsh console idm1.domain.test"
 
-# Check installation logs after completion
+# Check installation logs on VM after completion
 ssh ansiblerunner@10.10.10.100 "cat /root/install.post.log"
 ```
+
+After deployment completes, the playbook displays a summary showing all deployed VMs with their log file paths.
 
 **Deploy to specific host:**
 ```bash
@@ -298,6 +327,12 @@ ssh infra1 "ls -lh /mnt/md0/libvirt/filesystem/kickstart/"
 
 # Test SSH connectivity
 ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
+
+# Access cockpit web console (hypervisor)
+# Open browser to: https://infra1-ip:9090
+
+# Access cockpit web console (VM)
+# Open browser to: https://vm-ip:9090
 ```
 
 ## Configuration Details
@@ -350,24 +385,50 @@ ansible-playbook -i "10.10.10.100," -u ansiblerunner -m ping all
 - Falls back to `host.additional_disks` from host_vars if no Dell DC NVMe found or if already defined
 - Requires minimum 4 disks; playbook fails fast if insufficient
 - mdadm RAID 10 array on 4+ NVMe disks (auto-detected or configured)
-- Dual LVM-based storage pools (created based on VM requirements):
+- Dual LVM-based storage pools (both always created):
+  - **Percentage-Based Allocation**: Partition sizes calculated dynamically from RAID capacity
+    - `lvm_vg_filesystem_percent`: 15% (filesystem pool, default)
+    - `lvm_vg_block_percent`: 80% (block pool, default)
+    - `lvm_overhead_percent`: 5% (LVM metadata overhead, default)
+    - `lvm_snapshot_reserve_percent`: 15% (unallocated space in each VG for snapshots, default)
+    - Validation ensures total allocation ≤ 100%
   - **Filesystem Pool** (`nvme_pool_fs`):
-    - 1TiB GPT partition on RAID array (using binary units for parted compatibility)
+    - GPT partition on RAID array (percentage-based, calculated in GiB)
     - LVM physical volume and volume group (`vg_nvme_fs`)
-    - 100% LVM logical volume formatted with XFS
+    - LVM logical volume uses (100 - snapshot_reserve)% of VG, formatted with XFS
     - Mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`
     - Libvirt pool type: `dir`
     - SELinux context: `virt_image_t`
     - Used for VMs with `volume_mode: filesystem`
   - **Block Pool** (`nvme_pool_block`):
-    - 1TiB GPT partition on RAID array (using binary units for parted compatibility)
+    - GPT partition on RAID array (percentage-based, calculated in GiB)
     - LVM physical volume and volume group (`vg_nvme_block`)
     - Libvirt pool type: `logical`
     - Direct block device access for VM disks
     - Used for VMs with `volume_mode: block`
-- VM definitions in `vars/vm_vars.yml` determine which pools are created
 - Storage pools and networks configured with autostart enabled
 - mdmonitor service enabled for RAID monitoring
+
+**Customizing Storage Allocation:**
+
+Adjust storage percentages in `inventory/group_vars/infra_servers.yml`:
+
+```yaml
+# RAID to LVM allocation percentages
+lvm_vg_filesystem_percent: 15      # % of RAID for filesystem pool
+lvm_vg_block_percent: 80           # % of RAID for block pool
+lvm_overhead_percent: 5            # % reserved for LVM metadata overhead
+
+# Snapshot reserve within each VG
+lvm_snapshot_reserve_percent: 15   # % of each VG reserved for snapshots
+```
+
+**Notes:**
+- `filesystem_percent + block_percent + overhead_percent` must not exceed 100%
+- Playbook validates allocation and fails with clear error if invalid
+- Partition sizes displayed during deployment for verification
+- Snapshot reserve applies within each VG (not from total RAID capacity)
+- Example with 7 TiB RAID: 15% = 1.05 TiB filesystem, 80% = 5.6 TiB block, 5% = 350 GiB overhead
 
 ### VM Definitions
 
@@ -492,22 +553,26 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 │   ├── bare_metal_deploy_install.yml        # Phase 1b: Boot and install OS
 │   ├── kvm_host_configure.yml               # Phase 2: Configure RAID/libvirt/ISO
 │   ├── verify_raid_capability.yml           # Standalone: Verify RAID capability
-│   └── deploy_vm.yml                        # Phase 3: Deploy VMs with kickstart
+│   ├── deploy_vm.yml                        # Phase 3: Deploy VMs in parallel (orchestrator)
+│   └── deploy_single_vm.yml                 # Phase 3: Deploy single VM (worker)
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml # Per-host kickstart/image generation
 │   ├── detect_nvme_raid_devices.yml         # NVMe device auto-detection and verification
 │   ├── setup_raid.yml                       # RAID 10 configuration
 │   ├── setup_libvirt.yml                    # Libvirt infrastructure
 │   ├── distribute_iso.yml                   # RHEL ISO distribution
-│   ├── vm_kickstart_prep.yml                # VM kickstart generation
-│   └── vm_deploy_task.yml                   # Individual VM deployment
+│   ├── validate_os_disk.yml                 # OS disk capacity validation against filesystem layout
+│   ├── vm_deploy_task.yml                   # VM deployment tasks (includes kickstart prep)
+│   └── vm_remove_task.yml                   # VM removal tasks (cleanup storage)
 ├── vars/
 │   └── vm_vars.yml                          # VM definitions with network config
+├── logs/                                    # VM deployment logs (auto-created, gitignored)
+│   └── rhis_builder_kvm_lz_demo_<vmname>_prov.txt
 └── template/
     ├── ks.cfg.j2                            # Kickstart template (bare metal)
-    ├── vm_ks.cfg.j2                         # Kickstart template (VMs)
-    ├── vm_definition.xml.j2                 # Libvirt VM XML (with install media)
-    └── vm_definition_clean.xml.j2           # Libvirt VM XML (post-install)
+    ├── vm_ks.cfg.j2                         # Kickstart template (VMs) - uses reboot --eject
+    ├── vm_definition.xml.j2                 # Libvirt VM XML (with install media, boot order HDD/CD-ROM)
+    └── vm_definition_clean.xml.j2           # Libvirt VM XML (reference only, not actively used)
 ```
 
 ## Security Considerations
@@ -747,12 +812,15 @@ ssh infra1 "cat /mnt/md0/libvirt/filesystem/kickstart/idm1.domain.test-ks.cfg"
 3. If no Dell DC NVMe or `host.additional_disks` already defined: uses `host.additional_disks` from host_vars
 4. Verifies minimum 4 disks available (fails fast if insufficient)
 5. `setup_raid.yml` creates mdadm RAID 10 array using `host.additional_disks` paths
-6. Loads VM definitions from `vars/vm_vars.yml` to detect volume_mode requirements
-7. Partitions RAID array with GPT partition table (1TiB per pool type, using binary units)
-8. Creates LVM infrastructure:
-   - For filesystem mode: PV → VG (`vg_nvme_fs`) → LV → XFS → mount → dir pool
-   - For block mode: PV → VG (`vg_nvme_block`) → logical pool
-9. Configures libvirt storage pools for each mode in use with autostart enabled
+6. Queries RAID array size and calculates partition sizes from percentages (default: 15% filesystem, 80% block, 5% overhead)
+7. Partitions RAID array with GPT partition table (percentage-based sizes in GiB):
+   - Partition 1: Filesystem pool
+   - Partition 2: Block pool
+   - Both partitions always created
+8. Creates LVM infrastructure with snapshot reserves:
+   - For filesystem mode: PV → VG (`vg_nvme_fs`) → LV (85% of VG) → XFS → mount → dir pool
+   - For block mode: PV → VG (`vg_nvme_block`) → logical pool (15% unallocated for snapshots)
+9. Configures libvirt storage pools for both modes with autostart enabled
 
 **Key Points:**
 - **Dell BOSS detection** is fully automatic during kickstart - used for OS installation

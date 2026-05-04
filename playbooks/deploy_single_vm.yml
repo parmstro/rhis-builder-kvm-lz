@@ -1,0 +1,26 @@
+---
+- name: Deploy Single KVM VM
+  hosts: "{{ target_host | default('infra_servers') }}"
+  become: true
+  vars:
+    vm_name: "{{ vm_to_deploy | default('') }}"
+  vars_files:
+    - ../vars/vm_vars.yml
+  tasks:
+    - name: Find VM definition by name
+      ansible.builtin.set_fact:
+        vm: "{{ vms | selectattr('vmname', 'equalto', vm_name) | first }}"
+
+    - name: Validate VM is assigned to this host
+      ansible.builtin.assert:
+        that:
+          - vm.target_host == inventory_hostname
+        fail_msg: "VM {{ vm_name }} is not assigned to {{ inventory_hostname }}"
+        success_msg: "VM {{ vm_name }} is assigned to {{ inventory_hostname }}"
+
+    - name: Validate OS disk capacity against filesystem layout
+      ansible.builtin.include_tasks: ../tasks/validate_os_disk.yml
+
+    - name: Deploy VM
+      ansible.builtin.include_tasks: ../tasks/vm_deploy_task.yml
+...

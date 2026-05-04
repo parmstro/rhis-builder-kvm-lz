@@ -67,12 +67,9 @@
 # --- Temporary Files Cleanup ---
 # =====================================================================
 
-- name: "Remove temporary XML definition files: {{ vm.vmname }}"
+- name: "Remove temporary XML definition file: {{ vm.vmname }}"
   ansible.builtin.file:
-    path: "/tmp/{{ vm.vmname }}{{ item }}.xml"
+    path: "/tmp/{{ vm.vmname }}.xml"
     state: absent
   delegate_to: localhost
-  loop:
-    - ""
-    - "-clean"
 ...

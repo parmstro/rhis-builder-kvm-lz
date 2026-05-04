@@ -60,7 +60,7 @@ logvol /var/log/audit --vgname=vg_root --size={{ vm.fs.lv_var_log_audit_mb }} --
 logvol /var --vgname=vg_root --size={{ vm.fs.lv_var_mb }} --grow --name=lv_var --fstype={{ vm.fs.filesystem | default('xfs') }}
 
 text
-reboot
+reboot --eject
 
 %packages
 bash-completion
@@ -129,6 +129,12 @@ systemctl enable --now chronyd
 
 # Update system packages
 dnf -y update
+
+# Enable and start cockpit service
+echo "Enabling and starting cockpit service"
+systemctl enable --now cockpit.socket
+firewall-cmd --permanent --add-service=cockpit
+firewall-cmd --reload
 
 chvt 1
 ) 2>&1 | tee /root/install.post.log
