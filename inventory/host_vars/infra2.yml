@@ -8,8 +8,9 @@ host:
   ipv4_address: "10.10.10.52"
   ipv4_netmask: "255.255.255.0"
   ipv4_gateway: "10.10.10.1"
-  name_server1: "8.8.8.8"
-  name_server2: "8.8.4.4"
+  name_servers:
+    - "8.8.8.8"
+    - "8.8.4.4"
 
   # Disk Configuration - Using disk-by-id for stable device naming
   # Note: Kickstart will auto-detect Dell BOSS device if present, these values are fallback

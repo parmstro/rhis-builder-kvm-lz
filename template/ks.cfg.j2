@@ -15,7 +15,7 @@ selinux --enforcing
 keyboard us
 skipx
 
-network --device={{ host.mac }} --hostname {{ host.hostname }}.{{ host.domain }} --noipv6 --bootproto static --ip={{ host.ipv4_address }} --netmask={{ host.ipv4_netmask }} --gateway={{ host.ipv4_gateway }} --mtu=1500 --nameserver={{ host.name_server1 }},{{ host.name_server2 }}
+network --device={{ host.mac }} --hostname {{ host.hostname }}.{{ host.domain }} --noipv6 --bootproto static --ip={{ host.ipv4_address }} --netmask={{ host.ipv4_netmask }} --gateway={{ host.ipv4_gateway }} --mtu=1500 --nameserver={{ host.name_servers | join(',') }}
 
 rootpw --iscrypted {{ host.root_enc_pass }}
 firewall --service=ssh
@@ -162,7 +162,7 @@ nmcli con add type ethernet con-name "$real" ifname "$real" \
     ipv4.method manual \
     ipv4.addresses {{ host.ipv4_address ~ '/' ~ host.ipv4_netmask | ansible.utils.ipaddr('host/prefix') }} \
     ipv4.gateway {{ host.ipv4_gateway }} \
-    ipv4.dns "{{ host.name_server1 }} {{ host.name_server2 }}" \
+    ipv4.dns "{{ host.name_servers | join(' ') }}" \
     ipv4.dns-search "{{ host.domain }}" \
     802-3-ethernet.cloned-mac-address "{{ host.mac }}" \
     802-3-ethernet.mtu 1500 \
@@ -173,7 +173,7 @@ nmcli con add type ethernet con-name "$real" ifname "$real" \
     ipv4.never-default no
 
 # make sure that we get a reliable DNS for the base install
-nmcli conn mod $real ipv4.dns 8.8.8.8,8.8.4.4 && sudo nmcli conn up $real
+nmcli conn mod $real ipv4.dns {{ host.name_servers | join(',') }} && sudo nmcli conn up $real
 
 # add our provisioner user - this user is deleted later
 

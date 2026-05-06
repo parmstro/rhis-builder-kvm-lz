@@ -102,8 +102,9 @@ vms:
       ipv4_address: "<IP>"
       ipv4_netmask: "<netmask>"
       ipv4_gateway: "<gateway>"
-      name_server1: "<DNS1>"
-      name_server2: "<DNS2>"
+      name_servers:
+        - "<DNS1>"
+        - "<DNS2>"
     root_enc_pass: "<encrypted_password>"           # Root account password (use ansible-vault)
     grub_enc_pass: "<encrypted_password>"           # GRUB bootloader password (optional, use ansible-vault)
     username: "<provisioner_username>"              # Provisioner user account name

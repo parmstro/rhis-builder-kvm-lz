@@ -15,7 +15,7 @@ selinux --enforcing
 keyboard us
 skipx
 
-network --device={{ vm.network.mac }} --hostname {{ vm.vmname }} --noipv6 --bootproto=static --ip={{ vm.network.ipv4_address }} --netmask={{ vm.network.ipv4_netmask }} --gateway={{ vm.network.ipv4_gateway }} --mtu=1500 --nameserver={{ vm.network.name_server1 }},{{ vm.network.name_server2 }}
+network --device={{ vm.network.mac }} --hostname {{ vm.vmname }} --noipv6 --bootproto=static --ip={{ vm.network.ipv4_address }} --netmask={{ vm.network.ipv4_netmask }} --gateway={{ vm.network.ipv4_gateway }} --mtu=1500 --nameserver={{ vm.network.name_servers | join(',') }}
 
 rootpw --iscrypted {{ vm.root_enc_pass }}
 firewall --service=ssh
