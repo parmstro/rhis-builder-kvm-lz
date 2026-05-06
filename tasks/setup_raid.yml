@@ -120,10 +120,16 @@
   when: not raid_has_partitions | bool
   changed_when: true
 
+- name: Inform kernel of partition table changes on RAID array
+  ansible.builtin.command: partprobe /dev/{{ raid_name }}
+  when: not raid_has_partitions | bool
+  changed_when: false
+
 - name: Create partition for filesystem volume group
   community.general.parted:
     device: /dev/{{ raid_name }}
     number: 1
+    label: gpt
     state: present
     part_start: 0%
     part_end: "{{ fs_partition_size_gib }}GiB"
@@ -134,6 +140,7 @@
   community.general.parted:
     device: /dev/{{ raid_name }}
     number: 2
+    label: gpt
     state: present
     part_start: "{{ fs_partition_size_gib }}GiB"
     part_end: "{{ (fs_partition_size_gib | float + block_partition_size_gib | float) | round(2) }}GiB"
@@ -181,8 +188,7 @@
   community.general.filesystem:
     fstype: xfs
     dev: /dev/{{ lvm_vg_filesystem_name }}/lv_filesystem_pool
-    opts: "-L filesystem_pool"
-  when: lv_filesystem_created.changed
+    opts: "-L fs_pool"
 
 - name: Create mount point for filesystem pool
   ansible.builtin.file:
