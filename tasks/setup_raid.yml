@@ -124,6 +124,7 @@
   community.general.parted:
     device: /dev/{{ raid_name }}
     number: 1
+    label: gpt
     state: present
     part_start: 0%
     part_end: "{{ fs_partition_size_gib }}GiB"
@@ -134,6 +135,7 @@
   community.general.parted:
     device: /dev/{{ raid_name }}
     number: 2
+    label: gpt
     state: present
     part_start: "{{ fs_partition_size_gib }}GiB"
     part_end: "{{ (fs_partition_size_gib | float + block_partition_size_gib | float) | round(2) }}GiB"
