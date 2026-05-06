@@ -1,0 +1,93 @@
+---
+# =====================================================================
+# Disk Wipe Operations
+# =====================================================================
+# Wipes a single disk using the configured wipe method.
+# Expected variables:
+#   - wipe_target: The disk device path (e.g., /dev/nvme0n1)
+#   - wipe_method: The wipe method to use
+#   - wipe_log_file: Path to log file for this operation
+#
+# Required packages (installed by bare_metal_wipe_exec.yml):
+#   - coreutils: provides dd (zero method) and shred
+#   - util-linux: provides blkdiscard
+#   - nvme-cli: provides nvme format command
+# =====================================================================
+
+- name: "Display wipe operation: {{ wipe_target }}"
+  ansible.builtin.debug:
+    msg: "Wiping {{ wipe_target }} using method: {{ wipe_method }}"
+
+# =====================================================================
+# --- WIPE METHOD: ZERO (Fast, not secure) ---
+# =====================================================================
+
+- name: "Wipe with zeros: {{ wipe_target }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    dd if=/dev/zero of={{ wipe_target }} bs=1M status=progress 2>&1 | tee -a {{ wipe_log_file }}
+  register: wipe_result
+  failed_when: false
+  changed_when: wipe_result.rc == 0
+  when: wipe_method == "zero"
+  become: true
+
+# =====================================================================
+# --- WIPE METHOD: SHRED (Secure, slow) ---
+# =====================================================================
+
+- name: "Wipe with shred (3-pass): {{ wipe_target }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    shred -v -n 3 {{ wipe_target }} 2>&1 | tee -a {{ wipe_log_file }}
+  register: wipe_result
+  failed_when: false
+  changed_when: wipe_result.rc == 0
+  when: wipe_method == "shred"
+  become: true
+
+# =====================================================================
+# --- WIPE METHOD: BLKDISCARD (SSD TRIM) ---
+# =====================================================================
+
+- name: "Wipe with blkdiscard (TRIM): {{ wipe_target }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    blkdiscard -v {{ wipe_target }} 2>&1 | tee -a {{ wipe_log_file }}
+  register: wipe_result
+  failed_when: false
+  changed_when: wipe_result.rc == 0
+  when: wipe_method == "blkdiscard"
+  become: true
+
+# =====================================================================
+# --- WIPE METHOD: NVME FORMAT (NVMe secure erase) ---
+# =====================================================================
+
+- name: "Wipe with nvme format (secure erase): {{ wipe_target }}"
+  ansible.builtin.shell: |
+    set -o pipefail
+    # Extract NVMe namespace (e.g., /dev/nvme0n1 -> nvme0n1)
+    NS=$(basename {{ wipe_target }})
+    nvme format /dev/$(echo $NS | sed 's/n[0-9]*$//') -n $(echo $NS | grep -o 'n[0-9]*$' | sed 's/n//') -s 1 2>&1 | tee -a {{ wipe_log_file }}
+  register: wipe_result
+  failed_when: false
+  changed_when: wipe_result.rc == 0
+  when: wipe_method == "nvme-format"
+  become: true
+
+# =====================================================================
+# --- RESULT VALIDATION ---
+# =====================================================================
+
+- name: "Check wipe result for {{ wipe_target }}"
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'SUCCESS' if wipe_result.rc == 0 else 'FAILED' }}:
+      Wipe of {{ wipe_target }}
+      {{ 'completed' if wipe_result.rc == 0 else 'failed with rc=' + (wipe_result.rc | string) }}
+
+- name: "Record result for {{ wipe_target }}"
+  ansible.builtin.set_fact:
+    wipe_results: "{{ wipe_results | default({}) | combine({wipe_target: {'rc': wipe_result.rc, 'method': wipe_method}}) }}"
+...
