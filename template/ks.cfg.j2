@@ -122,7 +122,9 @@ fi
 
 # Generate clearpart command with detected or configured disk
 cat > /tmp/clearpart.cfg <<EOF
-clearpart --initlabel --drives=$BOOT_DISK
+# Switching to complete clearing of all detected devices, revisit
+#clearpart --initlabel --drives=$BOOT_DISK
+clearpart --all --initlabel
 EOF
 
 # Generate partition commands with detected or configured disks
