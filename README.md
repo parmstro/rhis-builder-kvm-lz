@@ -449,8 +449,9 @@ vms:
       ipv4_address: "10.10.10.100"
       ipv4_netmask: "255.255.255.0"
       ipv4_gateway: "10.10.10.1"
-      name_server1: "8.8.8.8"
-      name_server2: "8.8.4.4"
+      name_servers:
+        - "8.8.8.8"
+        - "8.8.4.4"
     root_enc_pass: "{{ encrypted_root_pass_vault }}"
     grub_enc_pass: "{{ encrypted_grub_pass_vault }}"
     username: "ansiblerunner"
@@ -491,7 +492,7 @@ vms:
 - `ipv4_address`: Static IP address for VM
 - `ipv4_netmask`: Network mask
 - `ipv4_gateway`: Default gateway
-- `name_server1`, `name_server2`: DNS servers
+- `name_servers`: List of DNS servers (supports one or more entries)
 
 **Authentication and Subscription:**
 Credentials and subscription details are defined per-VM using Ansible vault variables:
