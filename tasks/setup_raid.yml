@@ -189,7 +189,6 @@
     fstype: xfs
     dev: /dev/{{ lvm_vg_filesystem_name }}/lv_filesystem_pool
     opts: "-L fs_pool"
-  when: lv_filesystem_created.changed
 
 - name: Create mount point for filesystem pool
   ansible.builtin.file:
