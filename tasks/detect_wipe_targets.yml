@@ -1,0 +1,81 @@
+---
+# =====================================================================
+# Disk Detection for Wipe Operations
+# =====================================================================
+# Detects Dell BOSS and Dell DC NVMe devices based on configuration
+# flags. Results are stored in wipe_targets list.
+# =====================================================================
+
+- name: Initialize wipe targets list
+  ansible.builtin.set_fact:
+    wipe_targets: []
+
+# =====================================================================
+# --- DELL BOSS DEVICE DETECTION ---
+# =====================================================================
+
+- name: Detect Dell BOSS devices
+  ansible.builtin.shell: |
+    set -o pipefail
+    find /dev/disk/by-id -name "*Dell_BOSS*" 2>/dev/null | \
+      grep -E -v 'part|scsi' | xargs readlink -f | sort
+  register: boss_devices
+  changed_when: false
+  failed_when: false
+  when: wipe_boss_devices | default(false)
+
+- name: Add Dell BOSS devices to wipe targets
+  ansible.builtin.set_fact:
+    wipe_targets: "{{ wipe_targets + boss_devices.stdout_lines }}"
+  when:
+    - wipe_boss_devices | default(false)
+    - boss_devices.rc == 0
+    - boss_devices.stdout_lines | length > 0
+
+# =====================================================================
+# --- DELL DC NVME DEVICE DETECTION ---
+# =====================================================================
+
+- name: Detect Dell DC NVMe SSD devices
+  ansible.builtin.shell: |
+    set -o pipefail
+    find /dev/disk/by-id -name "*Dell_DC_NVMe*" 2>/dev/null | \
+      grep -E -v 'part|scsi' | grep -v '_1$' | xargs readlink -f | sort
+  register: nvme_devices
+  changed_when: false
+  failed_when: false
+  when: wipe_nvme_devices | default(false)
+
+- name: Add Dell DC NVMe devices to wipe targets
+  ansible.builtin.set_fact:
+    wipe_targets: "{{ wipe_targets + nvme_devices.stdout_lines }}"
+  when:
+    - wipe_nvme_devices | default(false)
+    - nvme_devices.rc == 0
+    - nvme_devices.stdout_lines | length > 0
+
+# =====================================================================
+# --- VALIDATION AND DISPLAY ---
+# =====================================================================
+
+- name: Validate at least one disk was detected
+  ansible.builtin.assert:
+    that:
+      - wipe_targets | length > 0
+    fail_msg: "No disks detected for wiping. Check wipe_boss_devices and wipe_nvme_devices settings."
+    success_msg: "Found {{ wipe_targets | length }} disk(s) for wiping"
+
+- name: Display wipe targets
+  ansible.builtin.debug:
+    msg:
+      - "==================================================="
+      - "Disks that will be WIPED on {{ inventory_hostname }}"
+      - "==================================================="
+      - "Wipe method: {{ wipe_method }}"
+      - "Dell BOSS devices: {{ 'YES' if wipe_boss_devices else 'NO' }}"
+      - "Dell DC NVMe devices: {{ 'YES' if wipe_nvme_devices else 'NO' }}"
+      - "Total disks: {{ wipe_targets | length }}"
+      - "Devices:"
+      - "{{ wipe_targets }}"
+      - "==================================================="
+...

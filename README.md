@@ -87,6 +87,7 @@ vim inventory/host_vars/infra3.yml
 
 **`inventory/group_vars/all/all.yml` (shared across all hosts):**
 - `iso_filename`: RHEL ISO filename
+- `liveiso_filename`: CentOS Stream 10 Live ISO filename (used for bare metal wipe and other automation utilities)
 - `img_filename`: OEMDRV image filename
 - `local_workspace`: Local workspace directory for kickstart generation
 - `http_server_base_url`: Base URL for HTTP installation media
@@ -554,16 +555,21 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 │   ├── kvm_host_configure.yml               # Phase 2: Configure RAID/libvirt/ISO
 │   ├── verify_raid_capability.yml           # Standalone: Verify RAID capability
 │   ├── deploy_vm.yml                        # Phase 3: Deploy VMs in parallel (orchestrator)
-│   └── deploy_single_vm.yml                 # Phase 3: Deploy single VM (worker)
+│   ├── deploy_single_vm.yml                 # Phase 3: Deploy single VM (worker)
+│   ├── remove_vm.yml                        # Utility: Remove VMs and storage (all or single)
+│   ├── bare_metal_wipe_prep.yml             # Utility: Transfer Live ISO and mount via iDRAC
+│   └── bare_metal_wipe_exec.yml             # Utility: Boot Live ISO and execute disk wipe
 ├── tasks/
 │   ├── bare_metal_deploy_prep_subtasks1.yml # Per-host kickstart/image generation
 │   ├── detect_nvme_raid_devices.yml         # NVMe device auto-detection and verification
+│   ├── detect_wipe_targets.yml              # Disk detection for wipe operations (BOSS and NVMe)
 │   ├── setup_raid.yml                       # RAID 10 configuration
 │   ├── setup_libvirt.yml                    # Libvirt infrastructure
 │   ├── distribute_iso.yml                   # RHEL ISO distribution
 │   ├── validate_os_disk.yml                 # OS disk capacity validation against filesystem layout
 │   ├── vm_deploy_task.yml                   # VM deployment tasks (includes kickstart prep)
-│   └── vm_remove_task.yml                   # VM removal tasks (cleanup storage)
+│   ├── vm_remove_task.yml                   # VM removal tasks (cleanup storage)
+│   └── wipe_disk.yml                        # Disk wipe operations (zero/shred/blkdiscard/nvme-format)
 ├── vars/
 │   └── vm_vars.yml                          # VM definitions with network config
 ├── logs/                                    # VM deployment logs (auto-created, gitignored)
@@ -796,6 +802,89 @@ ssh infra1 "cat /mnt/md0/libvirt/filesystem/kickstart/idm1.domain.test-ks.cfg"
   - Verify bridge configuration: `ip addr show br1`
 
 ## Advanced Usage
+
+### VM Lifecycle: Delete and Redeploy (Symmetric Workflow)
+
+`remove_vm.yml` and `deploy_single_vm.yml` are symmetric counterparts. Both accept `target_host` and a VM name extra var, enabling a clean delete + fresh install cycle without editing any configuration files.
+
+**Remove a single VM:**
+```bash
+ansible-playbook playbooks/remove_vm.yml \
+  -e target_host=infra1 \
+  -e vm_to_remove=idm1.domain.test
+```
+
+**Redeploy a fresh install of the same VM:**
+```bash
+ansible-playbook playbooks/deploy_single_vm.yml \
+  -e target_host=infra1 \
+  -e vm_to_deploy=idm1.domain.test
+```
+
+The VM definition in `vars/vm_vars.yml` is the single source of truth for both operations — no configuration changes are needed between steps.
+
+**Bulk operations (original behavior, fully preserved):**
+```bash
+# Remove all VMs on all infra hosts
+ansible-playbook playbooks/remove_vm.yml
+
+# Remove all VMs on a specific host
+ansible-playbook playbooks/remove_vm.yml --limit infra1
+```
+
+**Removal operations (in order for each VM):**
+1. Destroy running VM (forced shutdown if needed)
+2. Undefine VM from libvirt
+3. Remove filesystem-mode disk images (`.img` files)
+4. Remove block-mode logical volumes from the block VG
+5. Remove kickstart configuration and USB image files
+6. Clean up temporary XML definition files
+
+All operations are idempotent — safe to run even if the VM no longer exists.
+
+### Bare Metal Disk Wipe (Live ISO Utility)
+
+The bare metal wipe workflow uses the CentOS Stream 10 Live ISO (`CentOS-Stream-MIN-Live-Automation.x86_64-10.iso`) — a minimal live image that boots entirely in memory with an `ansible` user, Python3, and SSH pre-configured. This enables fully Ansible-driven disk operations without touching the installed OS.
+
+**Use cases:** Pre-reprovisioning storage wipe, NVMe secure erase, RAID teardown preparation.
+
+#### Wipe Methods
+
+Configure `wipe_method` in `inventory/group_vars/infra_servers.yml`:
+
+| Method | Tool | Package | Speed | Security | Best For |
+|--------|------|---------|-------|----------|---------|
+| `blkdiscard` | blkdiscard | util-linux | Instant | SSD-secure | **Default** — SSD/NVMe TRIM/UNMAP |
+| `zero` | dd | coreutils | Fast | Not compliant | Testing, non-sensitive data |
+| `shred` | shred | coreutils | Slow | DoD 3-pass | Compliance requirements |
+| `nvme-format` | nvme | nvme-cli | Instant | Hardware-secure | NVMe secure erase at the drive level |
+
+Required packages are installed automatically by the playbook before wipe operations begin.
+
+#### Disk Targeting
+
+Configure in `inventory/group_vars/infra_servers.yml`:
+
+```yaml
+wipe_boss_devices: true      # Target Dell BOSS devices
+wipe_nvme_devices: true      # Target Dell DC NVMe devices
+wipe_post_action: "poweroff" # Post-wipe action: poweroff, reboot, none
+```
+
+#### Workflow
+
+```bash
+# Step 1: Transfer Live ISO to HTTP server and mount via iDRAC virtual media
+ansible-playbook playbooks/bare_metal_wipe_prep.yml
+
+# Step 2: Boot to Live ISO, detect disks, wipe, then power off
+ansible-playbook playbooks/bare_metal_wipe_exec.yml
+
+# Optional: target a specific host
+ansible-playbook playbooks/bare_metal_wipe_exec.yml --limit infra1
+```
+
+Wipe logs are fetched to the controller at `logs/wipe_<hostname>_<timestamp>.log` before the post-wipe power action executes. Each log includes the wipe method, devices processed, per-disk success/failure status, and timestamps.
 
 ### Understanding Disk Detection Workflow
 

@@ -38,4 +38,27 @@ libvirt_network_mode: "bridge"
 
 # Network Configuration
 network_mtu: 1500
+
+# =====================================================================
+# Disk Wipe Configuration (for Live ISO operations)
+# =====================================================================
+# Wipe method options:
+# - zero: Fast dd-based zero write (not secure, good for testing)
+# - shred: DoD-compliant 3-pass overwrite (secure but slow)
+# - blkdiscard: SSD TRIM/UNMAP (fast, secure for SSDs) - DEFAULT
+# - nvme-format: NVMe secure erase (fastest, most secure for NVMe)
+wipe_method: "blkdiscard"
+
+# Disk targeting (auto-detection with opt-in/opt-out)
+wipe_boss_devices: true      # Wipe Dell BOSS devices
+wipe_nvme_devices: true      # Wipe Dell DC NVMe devices
+
+# Post-wipe action options: poweroff, reboot, none
+wipe_post_action: "poweroff"
+
+# Live ISO connection credentials
+ansible_user_liveiso: "ansible"
+ansible_ssh_pass_liveiso: "{{ vault_liveiso_password }}"
+# Alternative: Use SSH key instead of password
+# ansible_ssh_private_key_file_liveiso: "/path/to/liveiso_key"
 ...

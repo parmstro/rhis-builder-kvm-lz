@@ -1,0 +1,208 @@
+---
+- name: Boot Server to Live ISO and Execute Disk Wipe
+  hosts: infra_servers
+  connection: local
+  gather_facts: false
+
+  tasks:
+    # =====================================================================
+    # --- SAFETY PRE-FLIGHT CHECK ---
+    # =====================================================================
+
+    - name: Display wipe operation warning
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "WARNING: DESTRUCTIVE DISK WIPE OPERATION"
+          - "=============================================="
+          - "Host: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "This operation will PERMANENTLY ERASE disks"
+          - "Execution of this playbook is confirmation"
+          - "=============================================="
+
+    # =====================================================================
+    # --- BOOT OVERRIDE CONFIGURATION ---
+    # =====================================================================
+
+    - name: Configure First Boot Device to Virtual CD (Boot Once)
+      dellemc.openmanage.idrac_boot:
+        idrac_ip: "{{ idrac_ip }}"
+        idrac_user: "{{ idrac_user }}"
+        idrac_password: "{{ idrac_password }}"
+        validate_certs: false
+        boot_source_override_mode: "uefi"
+        boot_source_override_target: "cd"
+        boot_source_override_enabled: "once"
+      delegate_to: localhost
+
+    # =====================================================================
+    # --- POWER STATE MANAGEMENT ---
+    # =====================================================================
+
+    - name: Attempt graceful restart via iDRAC
+      dellemc.openmanage.redfish_powerstate:
+        baseuri: "{{ idrac_ip }}"
+        username: "{{ idrac_user }}"
+        password: "{{ idrac_password }}"
+        validate_certs: false
+        reset_type: "GracefulRestart"
+      delegate_to: localhost
+      register: restart_result
+      ignore_errors: true
+
+    - name: Power on device if already powered off
+      dellemc.openmanage.redfish_powerstate:
+        baseuri: "{{ idrac_ip }}"
+        username: "{{ idrac_user }}"
+        password: "{{ idrac_password }}"
+        validate_certs: false
+        reset_type: "On"
+      delegate_to: localhost
+      when: "'already powered off' in restart_result.msg | lower"
+
+    # =====================================================================
+    # --- LIVE ISO REACHABILITY MONITOR ---
+    # =====================================================================
+
+    - name: Wait for Live ISO to boot and become reachable via SSH
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        state: started
+        delay: 60   # Wait 1 minute for Live ISO boot
+        timeout: 600  # 10 minute timeout for Live ISO boot
+      delegate_to: localhost
+
+- name: Execute Disk Wipe Operations
+  hosts: infra_servers
+  gather_facts: true
+  vars:
+    # Override connection settings for Live ISO
+    ansible_user: "{{ ansible_user_liveiso }}"
+    ansible_ssh_pass: "{{ ansible_ssh_pass_liveiso }}"
+
+  tasks:
+    # =====================================================================
+    # --- LOG FILE INITIALIZATION ---
+    # =====================================================================
+
+    - name: Create wipe timestamp
+      ansible.builtin.set_fact:
+        wipe_timestamp: "{{ ansible_date_time.epoch }}"
+        wipe_log_file: "/tmp/wipe_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.log"
+
+    - name: Initialize wipe log file
+      ansible.builtin.shell: |
+        cat > {{ wipe_log_file }} <<'EOF'
+        ================================================================
+        Disk Wipe Operation Log
+        ================================================================
+        Host: {{ inventory_hostname }} ({{ ansible_host }})
+        Timestamp: {{ ansible_date_time.iso8601 }}
+        Wipe Method: {{ wipe_method }}
+        ================================================================
+        EOF
+      changed_when: false
+
+    # =====================================================================
+    # --- PACKAGE INSTALLATION ---
+    # =====================================================================
+
+    - name: Ensure wipe method packages are installed
+      ansible.builtin.dnf:
+        name:
+          - util-linux    # provides blkdiscard
+          - nvme-cli      # provides nvme format command
+        state: present
+      become: true
+
+    # =====================================================================
+    # --- DISK DETECTION ---
+    # =====================================================================
+
+    - name: Detect disks to wipe
+      ansible.builtin.include_tasks: ../tasks/detect_wipe_targets.yml
+
+    - name: Update log with detected disks
+      ansible.builtin.shell: |
+        echo "Disks to wipe: {{ wipe_targets | length }}" >> {{ wipe_log_file }}
+        {% for disk in wipe_targets %}
+        echo "  - {{ disk }}" >> {{ wipe_log_file }}
+        {% endfor %}
+        echo "================================================================" >> {{ wipe_log_file }}
+      changed_when: false
+
+    # =====================================================================
+    # --- WIPE OPERATIONS ---
+    # =====================================================================
+
+    - name: Wipe each detected disk
+      ansible.builtin.include_tasks: ../tasks/wipe_disk.yml
+      loop: "{{ wipe_targets }}"
+      loop_control:
+        loop_var: wipe_target
+
+    # =====================================================================
+    # --- RESULTS SUMMARY ---
+    # =====================================================================
+
+    - name: Generate wipe summary
+      ansible.builtin.set_fact:
+        wipe_summary: |
+          ================================================================
+          Disk Wipe Summary for {{ inventory_hostname }}
+          ================================================================
+          Total disks processed: {{ wipe_targets | length }}
+          Successful: {{ wipe_results.values() | selectattr('rc', 'equalto', 0) | list | length }}
+          Failed: {{ wipe_results.values() | rejectattr('rc', 'equalto', 0) | list | length }}
+
+          Details:
+          {% for device, result in wipe_results.items() %}
+          - {{ device }}: {{ 'SUCCESS' if result.rc == 0 else 'FAILED (rc=' + (result.rc | string) + ')' }} (method: {{ result.method }})
+          {% endfor %}
+
+          Log file: {{ wipe_log_file }}
+          ================================================================
+
+    - name: Display wipe summary
+      ansible.builtin.debug:
+        msg: "{{ wipe_summary }}"
+
+    - name: Append summary to log file
+      ansible.builtin.shell: |
+        echo "{{ wipe_summary }}" >> {{ wipe_log_file }}
+      changed_when: false
+
+    # =====================================================================
+    # --- LOG RETRIEVAL ---
+    # =====================================================================
+
+    - name: Fetch wipe log to controller
+      ansible.builtin.fetch:
+        src: "{{ wipe_log_file }}"
+        dest: "logs/wipe_{{ inventory_hostname }}_{{ wipe_timestamp }}.log"
+        flat: true
+
+    # =====================================================================
+    # --- POST-WIPE ACTION ---
+    # =====================================================================
+
+    - name: Power off system after wipe
+      ansible.builtin.command: poweroff
+      when: wipe_post_action == "poweroff"
+      failed_when: false
+      changed_when: true
+      become: true
+
+    - name: Reboot system after wipe
+      ansible.builtin.command: reboot
+      when: wipe_post_action == "reboot"
+      failed_when: false
+      changed_when: true
+      become: true
+
+    - name: Leave system running after wipe
+      ansible.builtin.debug:
+        msg: "Wipe complete. System left running in Live ISO for manual verification."
+      when: wipe_post_action == "none"
+...
