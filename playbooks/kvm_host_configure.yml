@@ -25,6 +25,12 @@
       ansible.builtin.debug:
         msg: "System registered: {{ rhsm_register.changed }}"
 
+    # Ensure that the most up-to-date packages are applied
+    - name: "Ensure the system is up to date" # noqa package-latest
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+
     # =====================================================================
     # --- Auto-detect NVMe Devices and Verify RAID Capability ---
     # =====================================================================
@@ -75,111 +81,34 @@
     # --- System Performance Tuning ---
     # =====================================================================
 
-    - name: Ensure tuned is installed
-      ansible.builtin.dnf:
-        name: tuned
-        state: present
+    - name: Configure system performance tuning
+      ansible.builtin.include_tasks: ../tasks/setup_performance_tuning.yml
+      tags:
+        - performance
+        - tuning
 
-    - name: Enable and start tuned service
-      ansible.builtin.systemd:
-        name: tuned
-        enabled: true
-        state: started
+    # =====================================================================
+    # -- Enable Intel Virtualization Technology for Directed I/O (VT-d)  --
+    # =====================================================================
 
-    - name: Set tuned profile to virtual-host
-      ansible.builtin.command: tuned-adm profile virtual-host
-      register: tuned_profile_set
-      changed_when: "'Tuning was successfully switched' in tuned_profile_set.stdout"
-
-    - name: Verify active tuned profile
-      ansible.builtin.command: tuned-adm active
-      register: tuned_active
-      changed_when: false
-
-    - name: Display active tuned profile
-      ansible.builtin.debug:
-        msg: "{{ tuned_active.stdout }}"
-
-    - name: Configure KVM module parameters for performance
-      ansible.builtin.lineinfile:
-        path: /etc/modprobe.d/kvm.conf
-        regexp: "^options kvm {{ item.key }}="
-        line: "options kvm {{ item.key }}={{ item.value }}"
-        create: true
-        mode: '0644'
-      loop:
-        - key: "hpage"
-          value: "1"
-        - key: "halt_poll_ns"
-          value: "{{ kvm_halt_poll_ns | default('50000') }}"
-      notify: KVM module reload required
-
-    - name: Calculate huge pages count based on VM memory requirements
-      ansible.builtin.set_fact:
-        calculated_hugepages: "{{ ((ansible_memtotal_mb * 0.7) / 2) | int }}"
-
-    - name: Reserve huge pages for KVM guests
-      ansible.posix.sysctl:
-        name: vm.nr_hugepages
-        value: "{{ hugepages_count | default(calculated_hugepages) }}"
-        sysctl_set: true
-        state: present
-        reload: true
-
-    - name: Check if CPU scheduler migration cost parameter exists
+    - name: Check for Intel VT-d IOMMU hardware capability via ACPI DMAR table
       ansible.builtin.stat:
-        path: /proc/sys/kernel/sched_migration_cost_ns
-      register: sched_migration_cost_exists
+        path: /sys/firmware/acpi/tables/DMAR
+      register: intel_iommu_dmar
 
-    - name: Configure CPU scheduler migration cost
-      ansible.posix.sysctl:
-        name: kernel.sched_migration_cost_ns
-        value: "{{ sched_migration_cost_ns | default('500000') }}"
-        sysctl_set: true
-        state: present
-        reload: true
-      when: sched_migration_cost_exists.stat.exists
-
-    - name: Check cgroup version
-      ansible.builtin.shell: |
-        set -o pipefail
-        if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-          echo "v2"
-        else
-          echo "v1"
-        fi
-      register: cgroup_version
-      changed_when: false
-
-    - name: Disable cpuset cgroup controller for CPU hotplug (cgroups v1 only)
-      ansible.builtin.lineinfile:
-        path: /etc/libvirt/qemu.conf
-        regexp: "^cgroup_controllers ="
-        line: 'cgroup_controllers = [ "cpu", "devices", "memory", "blkio", "cpuacct" ]'
-        backup: true
-      when: cgroup_version.stdout == "v1"
-      notify: Libvirtd restart required
-
-    - name: Verify huge pages configuration
-      ansible.builtin.command: cat /proc/meminfo
-      register: meminfo
-      changed_when: false
-
-    - name: Display huge pages status
+    - name: Display Intel IOMMU hardware capability status
       ansible.builtin.debug:
-        msg: "{{ meminfo.stdout_lines | select('search', 'HugePage') | list }}"
+        msg: >-
+          Intel VT-d (IOMMU):
+          {{ 'Present - proceeding with configuration' if intel_iommu_dmar.stat.exists
+          else 'Not present - skipping IOMMU configuration' }}
 
-    - name: Display KVM performance parameters
-      ansible.builtin.debug:
-        msg:
-          - "KVM Performance Tuning:"
-          - "  - Huge pages enabled: {{ hugepages_count | default(calculated_hugepages) }} pages"
-          - "  - KVM halt_poll_ns: {{ kvm_halt_poll_ns | default('50000') }} ns"
-          - >-
-            - CPU scheduler migration cost: {{ sched_migration_cost_ns | default('500000') }} ns
-            {{ '(configured)' if sched_migration_cost_exists.stat.exists else '(not available on this kernel)' }}
-          - "  - Cgroup version: {{ cgroup_version.stdout }}"
-          - "  - cpuset controller disabled: {{ 'Yes' if cgroup_version.stdout == 'v1' else 'N/A (cgroups v2)' }}"
+    - name: Enable Intel Virtualization Technology for Directed I/O (VT-d)
+      ansible.builtin.include_tasks: ../tasks/setup_intel_iommu.yml
+      when: intel_iommu_dmar.stat.exists
+      tags:
+        - performance
+        - tuning
 
     # =====================================================================
     # --- Verification ---
@@ -240,6 +169,49 @@
           | selectattr('disk.volume_mode', 'equalto', 'block')
           | list
           | length > 0 }}
+
+    - name: "Ensure system services are enabled and started"
+      ansible.builtin.systemd_service:
+        name: "{{ virtualization_service }}"
+        enabled: true
+        state: started
+      loop:
+        - virtqemud.socket
+        - virtqemud-ro.socket
+        - virtqemud-admin.socket
+        - virtnetworkd.socket
+        - virtnetworkd-ro.socket
+        - virtnetworkd-admin.socket
+        - virtnodedevd.socket
+        - virtnodedevd-ro.socket
+        - virtnodedevd-admin.socket
+        - virtnwfilterd.socket
+        - virtnwfilterd-ro.socket
+        - virtnwfilterd-admin.socket
+        - virtsecretd.socket
+        - virtsecretd-ro.socket
+        - virtsecretd-admin.socket
+        - virtstoraged.socket
+        - virtstoraged-ro.socket
+        - virtstoraged-admin.socket
+        - libvirtd-tls.socket
+      loop_control:
+        loop_var: virtualization_service
+
+    - name: "Validate virtualization services"
+      ansible.builtin.command: "virt-host-validate"
+      register: kvm_host_validate
+      changed_when: kvm_host_validate.rc == 0
+
+    - name: "Validate results"
+      ansible.builtin.debug:
+        var: kvm_host_validate
+
+    - name: "Assertion"
+      ansible.builtin.assert:
+        that:
+          - not "FAIL" in kvm_host_validate.stdout
+        fail_msg: "Please see debug validate results above for specific failures or warnings"
 
     - name: Verify libvirt network status
       ansible.builtin.command: virsh net-info {{ libvirt_network_name }}

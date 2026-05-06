@@ -1,0 +1,33 @@
+---
+- name: "Read boot command line"
+  ansible.builtin.slurp:
+    src: /proc/cmdline
+  register: file_content
+
+- name: "Set default state"
+  ansible.builtin.set_fact:
+    iommu_on: false
+
+- name: "Determine if iommu is on"
+  when: "'intel_iommu=on' in (file_content.content | b64decode)"
+  ansible.builtin.set_fact:
+    iommu_on: true
+
+- name: "Ensure intel_iommu=on in kernel cmdline arguments"
+  when: not iommu_on
+  ansible.builtin.command: "grubby --update-kernel=DEFAULT --args='intel_iommu=on'"
+  register: grubby_out
+  changed_when: grubby_out.rc == 0
+
+- name: "Update GRUB"
+  when: not iommu_on
+  ansible.builtin.command: "grub2-mkconfig -o /boot/grub2/grub.cfg"
+  register: grub_out
+  changed_when: grub_out.rc == 0
+
+- name: "Reboot and wait"
+  when: not iommu_on
+  ansible.builtin.reboot:
+    post_reboot_delay: 15
+    reboot_timeout: 900  # 15 minutes to accommodate Dell server POST times
+...

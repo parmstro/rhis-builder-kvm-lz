@@ -565,6 +565,7 @@ The appropriate storage pool is automatically created during `kvm_host_configure
 │   ├── detect_wipe_targets.yml              # Disk detection for wipe operations (BOSS and NVMe)
 │   ├── setup_raid.yml                       # RAID 10 configuration
 │   ├── setup_libvirt.yml                    # Libvirt infrastructure
+│   ├── setup_performance_tuning.yml         # KVM hypervisor performance tuning
 │   ├── distribute_iso.yml                   # RHEL ISO distribution
 │   ├── validate_os_disk.yml                 # OS disk capacity validation against filesystem layout
 │   ├── vm_deploy_task.yml                   # VM deployment tasks (includes kickstart prep)

@@ -225,6 +225,7 @@ This project implements IBM KVM performance best practices at both the hyperviso
 │   ├── detect_wipe_targets.yml                  # Disk detection for wipe operations (BOSS and NVMe)
 │   ├── setup_raid.yml                           # RAID 10 configuration tasks
 │   ├── setup_libvirt.yml                        # Libvirt infrastructure tasks
+│   ├── setup_performance_tuning.yml             # KVM hypervisor performance tuning tasks
 │   ├── distribute_iso.yml                       # RHEL ISO distribution to hypervisors
 │   ├── validate_os_disk.yml                     # OS disk capacity validation against filesystem layout
 │   ├── vm_deploy_task.yml                       # VM deployment tasks (includes kickstart prep)
