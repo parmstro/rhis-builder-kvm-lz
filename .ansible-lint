@@ -1,9 +1,32 @@
+# ansible-lint configuration for rhis-builder-kvm-lz
 ---
-# Ansible-lint configuration
+profile: production
 
-# Skip no-handler rule globally
-# Rationale: RAID setup tasks that run when changed are sequential setup steps,
-# not repetitive tasks suitable for handlers (tasks/setup_raid.yml lines 45, 52, 57)
+exclude_paths:
+  - .git/
+  - .github/
+  - .vscode/
+  - .devcontainer/
+  - .claude/
+  - tests/
+  - .cache/
+
 skip_list:
-  - no-handler
-...
+  - experimental
+  - role-name
+  - no-handler    # RAID setup tasks that run when changed are sequential setup steps,
+                  # not repetitive tasks suitable for handlers (tasks/setup_raid.yml lines 45, 52, 57)
+
+warn_list:
+  - no-changed-when
+  - command-instead-of-module
+  - risky-file-permissions
+  - var-naming[no-role-prefix]   # RHIS uses component-scoped prefixes — clean up incrementally
+
+enable_list:
+  - yaml
+  - fqcn
+  - fqcn-builtins
+
+offline: false
+verbosity: 1
