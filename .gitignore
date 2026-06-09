@@ -17,3 +17,5 @@ KVM*
 
 # Deployment logs
 logs/
+.vscode/
+.claude/
