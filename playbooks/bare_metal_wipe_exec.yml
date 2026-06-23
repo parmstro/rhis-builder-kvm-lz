@@ -69,7 +69,7 @@
         host: "{{ ansible_host }}"
         port: 22
         state: started
-        delay: 60   # Wait 1 minute for Live ISO boot
+        delay: 60    # Wait 1 minute for Live ISO boot
         timeout: 600  # 10 minute timeout for Live ISO boot
       delegate_to: localhost
 
@@ -82,127 +82,73 @@
     ansible_ssh_pass: "{{ ansible_ssh_pass_liveiso }}"
 
   tasks:
-    # =====================================================================
-    # --- LOG FILE INITIALIZATION ---
-    # =====================================================================
-
-    - name: Create wipe timestamp
+    - name: Record wipe timestamp for log retrieval
       ansible.builtin.set_fact:
         wipe_timestamp: "{{ ansible_date_time.epoch }}"
-        wipe_log_file: "/tmp/wipe_{{ inventory_hostname }}_{{ ansible_date_time.epoch }}.log"
 
-    - name: Initialize wipe log file
-      ansible.builtin.shell: |
-        cat > {{ wipe_log_file }} <<'EOF'
-        ================================================================
-        Disk Wipe Operation Log
-        ================================================================
-        Host: {{ inventory_hostname }} ({{ ansible_host }})
-        Timestamp: {{ ansible_date_time.iso8601 }}
-        Wipe Method: {{ wipe_method }}
-        ================================================================
-        EOF
-      changed_when: false
-
-    # =====================================================================
-    # --- PACKAGE INSTALLATION ---
-    # =====================================================================
-
-    - name: Ensure wipe method packages are installed
-      ansible.builtin.dnf:
-        name:
-          - util-linux    # provides blkdiscard
-          - nvme-cli      # provides nvme format command
-        state: present
-      become: true
-
-    # =====================================================================
-    # --- DISK DETECTION ---
-    # =====================================================================
-
-    - name: Detect disks to wipe
-      ansible.builtin.include_tasks: ../tasks/detect_wipe_targets.yml
-
-    - name: Update log with detected disks
-      ansible.builtin.shell: |
-        echo "Disks to wipe: {{ wipe_targets | length }}" >> {{ wipe_log_file }}
-        {% for disk in wipe_targets %}
-        echo "  - {{ disk }}" >> {{ wipe_log_file }}
-        {% endfor %}
-        echo "================================================================" >> {{ wipe_log_file }}
-      changed_when: false
-
-    # =====================================================================
-    # --- WIPE OPERATIONS ---
-    # =====================================================================
-
-    - name: Wipe each detected disk
-      ansible.builtin.include_tasks: ../tasks/wipe_disk.yml
-      loop: "{{ wipe_targets }}"
-      loop_control:
-        loop_var: wipe_target
-
-    # =====================================================================
-    # --- RESULTS SUMMARY ---
-    # =====================================================================
-
-    - name: Generate wipe summary
+    # Capture intended post-action before overriding for the role.
+    # The role is run with post_action: none so the wrapper can fetch logs
+    # before powering off or rebooting.
+    - name: Capture intended post-wipe action
       ansible.builtin.set_fact:
-        wipe_summary: |
-          ================================================================
-          Disk Wipe Summary for {{ inventory_hostname }}
-          ================================================================
-          Total disks processed: {{ wipe_targets | length }}
-          Successful: {{ wipe_results.values() | selectattr('rc', 'equalto', 0) | list | length }}
-          Failed: {{ wipe_results.values() | rejectattr('rc', 'equalto', 0) | list | length }}
+        __wrapper_post_action: "{{ kvm_wipe_disk_post_action }}"
 
-          Details:
-          {% for device, result in wipe_results.items() %}
-          - {{ device }}: {{ 'SUCCESS' if result.rc == 0 else 'FAILED (rc=' + (result.rc | string) + ')' }} (method: {{ result.method }})
-          {% endfor %}
+    - name: Override role post-action to defer power control to wrapper
+      ansible.builtin.set_fact:
+        kvm_wipe_disk_post_action: "none"
 
-          Log file: {{ wipe_log_file }}
-          ================================================================
+    # =====================================================================
+    # --- DISK DETECTION AND WIPE ---
+    # =====================================================================
 
-    - name: Display wipe summary
-      ansible.builtin.debug:
-        msg: "{{ wipe_summary }}"
-
-    - name: Append summary to log file
-      ansible.builtin.shell: |
-        echo "{{ wipe_summary }}" >> {{ wipe_log_file }}
-      changed_when: false
+    - name: Detect and wipe disks via collection role
+      ansible.builtin.import_role:
+        name: elise.rhis_builder_kvm_lz.kvm_wipe_disk
 
     # =====================================================================
     # --- LOG RETRIEVAL ---
     # =====================================================================
 
-    - name: Fetch wipe log to controller
+    - name: Find wipe log files on remote host
+      ansible.builtin.find:
+        paths: "{{ kvm_wipe_disk_log_path }}"
+        patterns: "wipe_*.log"
+      register: wipe_log_files
+
+    - name: Ensure local logs directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../logs"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+
+    - name: Fetch wipe logs to controller
       ansible.builtin.fetch:
-        src: "{{ wipe_log_file }}"
-        dest: "logs/wipe_{{ inventory_hostname }}_{{ wipe_timestamp }}.log"
+        src: "{{ item.path }}"
+        dest: "logs/wipe_{{ inventory_hostname }}_{{ wipe_timestamp }}_{{ item.path | basename }}"
         flat: true
+      loop: "{{ wipe_log_files.files }}"
 
     # =====================================================================
     # --- POST-WIPE ACTION ---
     # =====================================================================
 
     - name: Power off system after wipe
-      ansible.builtin.command: poweroff
-      when: wipe_post_action == "poweroff"
-      failed_when: false
-      changed_when: true
+      community.general.shutdown:
+        msg: "kvm_wipe_disk: wipe complete, powering off"
+        delay: 0
+      when: __wrapper_post_action == "poweroff"
       become: true
 
     - name: Reboot system after wipe
-      ansible.builtin.command: reboot
-      when: wipe_post_action == "reboot"
-      failed_when: false
-      changed_when: true
+      ansible.builtin.reboot:
+        post_reboot_delay: 15
+        reboot_timeout: 600
+      when: __wrapper_post_action == "reboot"
       become: true
 
     - name: Leave system running after wipe
       ansible.builtin.debug:
         msg: "Wipe complete. System left running in Live ISO for manual verification."
-      when: wipe_post_action == "none"
+      when: __wrapper_post_action == "none"
 ...

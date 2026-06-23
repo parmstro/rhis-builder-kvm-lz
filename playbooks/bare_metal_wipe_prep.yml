@@ -10,13 +10,13 @@
 
     - name: Verify Live ISO exists locally
       ansible.builtin.stat:
-        path: "{{ local_iso_path }}/{{ liveiso_filename }}"
+        path: "{{ local_iso_path }}/{{ kvm_distribute_iso_liveiso_filename }}"
       register: liveiso_stat
       failed_when: not liveiso_stat.stat.exists
 
     - name: Display Live ISO location
       ansible.builtin.debug:
-        msg: "Live ISO found: {{ local_iso_path }}/{{ liveiso_filename }}"
+        msg: "Live ISO found: {{ local_iso_path }}/{{ kvm_distribute_iso_liveiso_filename }}"
 
 - name: Transfer Live ISO to HTTP Server
   hosts: http_servers
@@ -31,14 +31,14 @@
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       become: true
 
     - name: Ensure target HTTP iso subdirectory exists
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}/iso"
         state: directory
-        mode: '0755'
+        mode: "0755"
       become: true
 
     # =====================================================================
@@ -47,8 +47,8 @@
 
     - name: Copy Live ISO to remote HTTP server iso subdirectory
       ansible.posix.synchronize:
-        src: "{{ local_iso_path }}/{{ liveiso_filename }}"
-        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ liveiso_filename }}"
+        src: "{{ local_iso_path }}/{{ kvm_distribute_iso_liveiso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ kvm_distribute_iso_liveiso_filename }}"
         rsync_opts:
           - "--chmod=0644"
       become: true
@@ -59,21 +59,21 @@
 
     - name: Copy Live ISO to /dev/shm on remote HTTP server for tmpfs performance
       ansible.posix.synchronize:
-        src: "{{ local_iso_path }}/{{ liveiso_filename }}"
-        dest: "{{ remote_http_user }}@{{ remote_http_host }}:/dev/shm/{{ liveiso_filename }}"
+        src: "{{ local_iso_path }}/{{ kvm_distribute_iso_liveiso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:/dev/shm/{{ kvm_distribute_iso_liveiso_filename }}"
         rsync_opts:
           - "--chmod=0644"
       become: true
-      when: iso_use_tmpfs | default(false) | bool
+      when: kvm_distribute_iso_use_tmpfs | default(false) | bool
 
     - name: Create symlink from HTTP docroot to Live ISO in /dev/shm
       ansible.builtin.file:
-        src: "/dev/shm/{{ liveiso_filename }}"
-        dest: "{{ remote_http_docroot }}/iso/{{ liveiso_filename }}"
+        src: "/dev/shm/{{ kvm_distribute_iso_liveiso_filename }}"
+        dest: "{{ remote_http_docroot }}/iso/{{ kvm_distribute_iso_liveiso_filename }}"
         state: link
         force: true
       become: true
-      when: iso_use_tmpfs | default(false) | bool
+      when: kvm_distribute_iso_use_tmpfs | default(false) | bool
 
     # =====================================================================
     # --- SELINUX CONFIGURATION ---
@@ -135,6 +135,6 @@
           - index: 1
             insert: true
             media_type: "DVD"
-            image: "{{ http_server_base_url }}/iso/{{ liveiso_filename }}"
+            image: "{{ kvm_distribute_iso_http_server_base_url }}/iso/{{ kvm_distribute_iso_liveiso_filename }}"
       delegate_to: localhost
 ...

@@ -1,5 +1,5 @@
 ---
 remote_http_host: "10.5.200.200"
 remote_http_user: "ansible_worker"
-iso_use_tmpfs: false # if true, copy ISO to /dev/shm and symlink from http docroot
+kvm_distribute_iso_use_tmpfs: false  # if true, copy ISO to /dev/shm and symlink from http docroot
 ...

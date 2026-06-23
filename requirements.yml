@@ -1,5 +1,8 @@
 ---
 collections:
+  - name: elise.rhis_builder_kvm_lz
+    source: ../elise.rhis_builder_kvm_lz
+    type: dir
   - name: dellemc.openmanage
   - name: community.libvirt
   - name: community.general

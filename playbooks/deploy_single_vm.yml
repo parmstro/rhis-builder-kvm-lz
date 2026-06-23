@@ -18,9 +18,7 @@
         fail_msg: "VM {{ vm_name }} is not assigned to {{ inventory_hostname }}"
         success_msg: "VM {{ vm_name }} is assigned to {{ inventory_hostname }}"
 
-    - name: Validate OS disk capacity against filesystem layout
-      ansible.builtin.include_tasks: ../tasks/validate_os_disk.yml
-
     - name: Deploy VM
-      ansible.builtin.include_tasks: ../tasks/vm_deploy_task.yml
+      ansible.builtin.import_role:
+        name: elise.rhis_builder_kvm_lz.kvm_deploy_vm
 ...

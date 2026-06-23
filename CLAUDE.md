@@ -10,7 +10,7 @@ This project follows the [Red Hat COP Automation Good Practices](https://redhat-
 
 - **Indentation**: 2 spaces
 - **File extension**: Use `.yml` (not `.yaml`)
-- **Line length**: 120 characters maximum (soft limit)
+- **Line length**: 160 characters maximum (soft limit)
 - **String quoting**: Double quotes for YAML strings; single quotes for Jinja2 expressions
 - **Booleans**: Use `true`/`false` (not `yes`/`no`)
 - **Comments**: Comments are acceptable and encouraged for clarity
@@ -67,16 +67,16 @@ This project follows the [Red Hat COP Automation Good Practices](https://redhat-
     - Playbook fails fast if fewer than 4 disks available
   - Dual Storage Pool Architecture:
     - RAID array partitioned using percentage-based allocation (both pools always created)
-    - **Filesystem Pool** (volume_mode: filesystem): Percentage-based LVM partition with XFS, mounted at `/mnt/{{ raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
+    - **Filesystem Pool** (volume_mode: filesystem): Percentage-based LVM partition with XFS, mounted at `/mnt/{{ kvm_setup_raid_name }}/libvirt/filesystem`, libvirt pool type `dir`
     - **Block Pool** (volume_mode: block): Percentage-based LVM volume group, libvirt pool type `logical` for direct block access
     - Partition allocation percentages configured in `inventory/group_vars/infra_servers.yml`:
-      - `lvm_vg_filesystem_percent`: Percentage of RAID for filesystem pool (default: 15%)
-      - `lvm_vg_block_percent`: Percentage of RAID for block pool (default: 80%)
-      - `lvm_overhead_percent`: Reserved for LVM metadata overhead (default: 5%)
-      - `lvm_snapshot_reserve_percent`: Unallocated space within each VG for snapshots (default: 15%)
+      - `kvm_setup_raid_lvm_vg_filesystem_percent`: Percentage of RAID for filesystem pool (default: 15%)
+      - `kvm_setup_raid_lvm_vg_block_percent`: Percentage of RAID for block pool (default: 80%)
+      - `kvm_setup_raid_lvm_overhead_percent`: Reserved for LVM metadata overhead (default: 5%)
+      - `kvm_setup_raid_lvm_snapshot_reserve_percent`: Unallocated space within each VG for snapshots (default: 15%)
     - Validation ensures `filesystem_percent + block_percent + overhead_percent ≤ 100%`
     - Partition sizes calculated dynamically from RAID size at deployment time
-    - Snapshot reserve: Filesystem pool LV uses `(100 - lvm_snapshot_reserve_percent)%VG`, block pool leaves space for individual VM disk LVs
+    - Snapshot reserve: Filesystem pool LV uses `(100 - kvm_setup_raid_lvm_snapshot_reserve_percent)%VG`, block pool leaves space for individual VM disk LVs
 - **Network Configuration**:
   - Primary NIC: Configured during kickstart (identified by MAC address)
   - Libvirt bridge: Configured on second NIC with active link
@@ -186,9 +186,10 @@ This project implements IBM KVM performance best practices at both the hyperviso
 - **Guest kernel**: IOMMU passthrough for PCI passthrough performance (optional)
 
 **Configurable Parameters** (via `inventory/group_vars/infra_servers.yml`):
-- `hugepages_count`: Override automatic huge pages calculation
-- `kvm_halt_poll_ns`: Tune idle vCPU polling (50000ns default, 0 for low CPU usage, 80000ns for low latency)
-- `sched_migration_cost_ns`: Tune CPU migration algorithm (500000ns default)
+- `kvm_host_performance_hugepages_count`: Override automatic huge pages calculation
+- `kvm_host_performance_halt_poll_ns`: Tune idle vCPU polling (50000ns default, 0 for low CPU usage, 80000ns for low latency)
+- `kvm_host_performance_sched_migration_cost_ns`: Tune CPU migration algorithm (500000ns default)
+- `kvm_deploy_parallel_mode`: VM deployment parallelism strategy (`"subprocess"` or `"native"`)
 
 ## File Structure
 
@@ -198,6 +199,10 @@ This project implements IBM KVM performance best practices at both the hyperviso
 ├── ansible.cfg                                  # Ansible configuration
 ├── requirements.yml                             # Ansible collection requirements
 ├── requirements.txt                             # Python package requirements
+├── collections/                                 # Installed collections (gitignored)
+│   └── ansible_collections/
+│       └── elise/
+│           └── rhis_builder_kvm_lz/             # The collection providing all KVM roles
 ├── inventory/
 │   ├── hosts.yml                                # Inventory file
 │   ├── group_vars/
@@ -215,32 +220,21 @@ This project implements IBM KVM performance best practices at both the hyperviso
 │   ├── bare_metal_deploy_install.yml            # Phase 2: Boot and install OS
 │   ├── kvm_host_configure.yml                   # Phase 3: Configure RAID/libvirt/ISO
 │   ├── verify_raid_capability.yml               # Standalone: Verify RAID capability
-│   ├── deploy_vm.yml                            # Phase 4: Deploy VMs in parallel (orchestrator)
-│   ├── deploy_single_vm.yml                     # Phase 4: Deploy single VM (worker)
+│   ├── deploy_vm.yml                            # Phase 4: Deploy VMs (orchestrator)
+│   ├── deploy_single_vm.yml                     # Phase 4: Deploy single VM (worker, subprocess mode)
 │   ├── remove_vm.yml                            # Utility: Remove VMs and storage (all or single)
 │   ├── bare_metal_wipe_prep.yml                 # Utility: Transfer Live ISO and mount via iDRAC
 │   └── bare_metal_wipe_exec.yml                 # Utility: Boot Live ISO and execute disk wipe
-├── tasks/
-│   ├── bare_metal_deploy_prep_subtasks1.yml     # Per-host kickstart/image generation
-│   ├── detect_nvme_raid_devices.yml             # NVMe device auto-detection and RAID verification
-│   ├── detect_wipe_targets.yml                  # Disk detection for wipe operations (BOSS and NVMe)
-│   ├── setup_raid.yml                           # RAID 10 configuration tasks
-│   ├── setup_libvirt.yml                        # Libvirt infrastructure tasks
-│   ├── setup_performance_tuning.yml             # KVM hypervisor performance tuning tasks
-│   ├── distribute_iso.yml                       # RHEL ISO distribution to hypervisors
-│   ├── validate_os_disk.yml                     # OS disk capacity validation against filesystem layout
-│   ├── vm_deploy_task.yml                       # VM deployment tasks (includes kickstart prep)
-│   ├── vm_remove_task.yml                       # VM removal tasks (cleanup storage)
-│   └── wipe_disk.yml                            # Disk wipe operations (zero/shred/blkdiscard/nvme-format)
 ├── vars/
 │   └── vm_vars.yml                              # VM definitions with network config
-├── logs/                                        # VM deployment logs (auto-created, gitignored)
-│   └── rhis_builder_kvm_lz_demo_<vmname>_prov.txt
-└── template/
-    ├── ks.cfg.j2                                # Kickstart template (bare metal)
-    ├── vm_ks.cfg.j2                             # Kickstart template (VMs) - uses reboot --eject
-    ├── vm_definition.xml.j2                     # Libvirt VM XML template (with install media)
-    └── vm_definition_clean.xml.j2               # Libvirt VM XML template (reference only, not actively used)
+└── logs/                                        # VM deployment/wipe logs (auto-created, gitignored)
+    └── rhis_builder_kvm_lz_demo_<vmname>_prov.txt
+```
+
+**Collection install:** After cloning, install the collection before running playbooks:
+
+```bash
+ansible-galaxy collection install -r requirements.yml --force -p collections/
 ```
 
 ## Deployment Workflow
@@ -254,10 +248,10 @@ This project implements IBM KVM performance best practices at both the hyperviso
 2. Update `inventory/host_vars/*.yml` with host-specific configuration
 3. Update shared variables:
    - `inventory/group_vars/all/all.yml`: Shared across all hosts
-     - `iso_filename`: RHEL ISO filename (e.g., `rhel-9.7-x86_64-dvd.iso`)
-     - `img_filename`: OEMDRV image filename (e.g., `oemdrv.img`)
-     - `local_workspace`: Local workspace directory (e.g., `/tmp/kickstart`)
-     - `http_server_base_url`: Base URL for HTTP server (e.g., `http://provisioner.domain.test/provision`)
+     - `kvm_distribute_iso_filename`: RHEL ISO filename (e.g., `rhel-9.7-x86_64-dvd.iso`)
+     - `kvm_bare_metal_provision_img_filename`: OEMDRV image filename (e.g., `oemdrv.img`)
+     - `kvm_bare_metal_provision_local_workspace`: Local workspace directory (e.g., `/tmp/kickstart`)
+     - `kvm_distribute_iso_http_server_base_url`: Base URL for HTTP server (e.g., `http://provisioner.domain.test/provision`)
      - `remote_http_docroot`: HTTP server document root path (e.g., `/var/www/html/provision`)
    - `inventory/group_vars/http_servers.yml`: HTTP server group variables
      - `local_iso_path`: Directory containing RHEL ISO (e.g., `/home/user/iso`)
@@ -293,8 +287,7 @@ This project implements IBM KVM performance best practices at both the hyperviso
      - Creates bridge with IPv4/IPv6 disabled (no IP address)
      - Adds physical interface as bridge slave using modern NetworkManager syntax
    - Creates appropriate libvirt storage pools with autostart enabled
-   - Installs required packages for VM kickstart (dosfstools, mtools, qemu-img)
-   - Downloads RHEL ISO from HTTP server to each hypervisor's filesystem pool (`/mnt/md0/libvirt/filesystem/iso/`)
+   - Downloads RHEL ISO from HTTP server to each hypervisor's filesystem pool (`/mnt/{{ kvm_setup_raid_name }}/libvirt/filesystem/iso/`)
    - Configures performance tuning (IBM KVM best practices):
      - Sets tuned profile to `virtual-host`
      - Configures KVM module parameters (hpage=1, halt_poll_ns)
@@ -309,7 +302,9 @@ This project implements IBM KVM performance best practices at both the hyperviso
 3. Deploy VMs: `ansible-playbook playbooks/deploy_vm.yml`
    - Playbook runs on all `infra_servers`
    - Each host deploys only VMs with matching `target_host`
-   - **VMs deploy in parallel on each hypervisor** (up to 2 hour timeout per VM)
+   - **Parallel mode** controlled by `kvm_deploy_parallel_mode` in `inventory/group_vars/infra_servers.yml`:
+     - `"subprocess"` (default): Each VM deploys via an `ansible-playbook` subprocess. Provides per-VM log isolation at `logs/rhis_builder_kvm_lz_demo_<vmname>_prov.txt`. Up to 2 hour timeout per VM.
+     - `"native"`: Uses `include_role` loop — AAP-compatible, no subprocess overhead. VMs deploy sequentially per host; parallelism across hosts comes from Ansible forks.
    - Can deploy to specific host: `ansible-playbook playbooks/deploy_vm.yml --limit infra1`
 
 **Pre-Deployment Validation:**
@@ -379,7 +374,7 @@ For rapid iteration during development or troubleshooting deployment issues:
 1. Check VM state and destroy if running (forced shutdown)
 2. Undefine VM from libvirt
 3. Remove filesystem-mode disk images (`.img` files)
-4. Remove block-mode logical volumes from `{{ lvm_vg_block_name }}`
+4. Remove block-mode logical volumes from `{{ kvm_setup_raid_lvm_vg_block_name }}`
 5. Remove kickstart configuration and USB image files
 6. Clean up temporary XML definition files
 
@@ -414,7 +409,7 @@ The bare metal wipe workflow uses the CentOS Stream 10 Live ISO (`CentOS-Stream-
 
 **Use cases:** Pre-reprovisioning storage wipe, NVMe secure erase, RAID teardown preparation.
 
-**Supported wipe methods** (configured via `wipe_method` in `inventory/group_vars/infra_servers.yml`):
+**Supported wipe methods** (configured via `kvm_wipe_disk_method` in `inventory/group_vars/infra_servers.yml`):
 
 | Method | Tool | Package | Notes |
 |--------|------|---------|-------|
@@ -424,8 +419,8 @@ The bare metal wipe workflow uses the CentOS Stream 10 Live ISO (`CentOS-Stream-
 | `nvme-format` | nvme | nvme-cli | NVMe hardware secure erase, fastest |
 
 **Disk targeting** (configured in `inventory/group_vars/infra_servers.yml`):
-- `wipe_boss_devices: true` — targets Dell BOSS devices
-- `wipe_nvme_devices: true` — targets Dell DC NVMe devices
+- `kvm_wipe_disk_boss_devices: true` — targets Dell BOSS devices
+- `kvm_wipe_disk_nvme_devices: true` — targets Dell DC NVMe devices
 
 **Workflow:**
 
