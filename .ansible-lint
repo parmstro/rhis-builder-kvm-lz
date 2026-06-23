@@ -10,6 +10,7 @@ exclude_paths:
   - .claude/
   - tests/
   - .cache/
+  - collections/  # third-party installed collections — not owned by this project
 
 skip_list:
   - experimental

@@ -1,62 +1,76 @@
 ---
-# RAID Configuration
-raid_level: 10
-raid_name: "md0"
-raid_chunk_size: 512  # KB
-raid_metadata_version: "1.2"
+# =====================================================================
+# RAID Configuration — kvm_setup_raid role
+# =====================================================================
+kvm_setup_raid_level: 10
+kvm_setup_raid_name: "md0"
+kvm_setup_raid_chunk_size: 512  # KB
+kvm_setup_raid_metadata_version: "1.2"
 
-# LVM Configuration
-lvm_vg_filesystem_name: "vg_nvme_fs"
-lvm_vg_block_name: "vg_nvme_block"
+# LVM Volume Group names
+kvm_setup_raid_lvm_vg_filesystem_name: "vg_nvme_fs"
+kvm_setup_raid_lvm_vg_block_name: "vg_nvme_block"
 
 # RAID to LVM allocation percentages
 # Note: filesystem_percent + block_percent + overhead_percent must not exceed 100
-lvm_vg_filesystem_percent: 15      # % of md0 for filesystem pool
-lvm_vg_block_percent: 80           # % of md0 for block pool
-lvm_overhead_percent: 5            # % reserved for LVM metadata overhead
+kvm_setup_raid_lvm_vg_filesystem_percent: 15      # % of RAID for filesystem pool
+kvm_setup_raid_lvm_vg_block_percent: 80           # % of RAID for block pool
+kvm_setup_raid_lvm_overhead_percent: 5            # % reserved for LVM metadata overhead
 
 # Snapshot reserve within each VG (percentage of VG capacity left unallocated)
-lvm_snapshot_reserve_percent: 15   # % of each VG reserved for snapshots
+kvm_setup_raid_lvm_snapshot_reserve_percent: 15   # % of each VG reserved for snapshots
 
-# Libvirt Storage Pools
-libvirt_pool_filesystem_name: "nvme_pool_fs"
-libvirt_pool_filesystem_path: "/mnt/{{ raid_name }}/libvirt/filesystem"
-libvirt_pool_filesystem_type: "dir"
+# =====================================================================
+# Libvirt Storage Pools — kvm_setup_libvirt role
+# =====================================================================
+kvm_setup_libvirt_pool_filesystem_name: "nvme_pool_fs"
+kvm_setup_libvirt_pool_filesystem_path: "/mnt/{{ kvm_setup_raid_name }}/libvirt/filesystem"
+kvm_setup_libvirt_pool_filesystem_type: "dir"
 
-libvirt_pool_block_name: "nvme_pool_block"
-libvirt_pool_block_type: "logical"
+kvm_setup_libvirt_pool_block_name: "nvme_pool_block"
+kvm_setup_libvirt_pool_block_type: "logical"
 
+# =====================================================================
+# Libvirt Network Configuration — kvm_setup_libvirt role
+# =====================================================================
+# Primary NIC configured during kickstart via MAC address
+# Bridge will be created on second NIC with active link
+kvm_setup_libvirt_bridge_name: "br1"
+kvm_setup_libvirt_network_name: "libvirt_net1"  # Increment allows for additional networks
+kvm_setup_libvirt_network_mode: "bridge"
+kvm_setup_libvirt_network_mtu: 1500
+
+# =====================================================================
+# VM Deployment — wrapper config
+# =====================================================================
 # VM definitions file path
 vm_vars_file: "{{ playbook_dir }}/../vars/vm_vars.yml"
 
-# Libvirt Network Configuration
-# Primary NIC configured during kickstart via MAC address
-# Bridge will be created on second NIC with active link
-libvirt_bridge_name: "br1"
-libvirt_network_name: "libvirt_net1"  # Increment allows for additional networks
-libvirt_network_mode: "bridge"
-
-# Network Configuration
-network_mtu: 1500
+# Parallel deployment mode:
+#   subprocess — per-VM log isolation via ansible-playbook subprocesses (default, CLI-native)
+#   native     — include_role + async/poll loop; AAP-compatible, output managed by controller
+kvm_deploy_parallel_mode: "subprocess"
 
 # =====================================================================
-# Disk Wipe Configuration (for Live ISO operations)
+# Disk Wipe Configuration — kvm_wipe_disk role (for Live ISO operations)
 # =====================================================================
 # Wipe method options:
 # - zero: Fast dd-based zero write (not secure, good for testing)
 # - shred: DoD-compliant 3-pass overwrite (secure but slow)
 # - blkdiscard: SSD TRIM/UNMAP (fast, secure for SSDs) - DEFAULT
 # - nvme-format: NVMe secure erase (fastest, most secure for NVMe)
-wipe_method: "blkdiscard"
+kvm_wipe_disk_method: "blkdiscard"
 
 # Disk targeting (auto-detection with opt-in/opt-out)
-wipe_boss_devices: true      # Wipe Dell BOSS devices
-wipe_nvme_devices: true      # Wipe Dell DC NVMe devices
+kvm_wipe_disk_boss_devices: true      # Wipe Dell BOSS devices
+kvm_wipe_disk_nvme_devices: true      # Wipe Dell DC NVMe devices
 
 # Post-wipe action options: poweroff, reboot, none
-wipe_post_action: "poweroff"
+kvm_wipe_disk_post_action: "poweroff"
 
-# Live ISO connection credentials
+# =====================================================================
+# Live ISO connection credentials — playbook connection vars (not role vars)
+# =====================================================================
 ansible_user_liveiso: "ansible"
 ansible_ssh_pass_liveiso: "{{ vault_liveiso_password }}"
 # Alternative: Use SSH key instead of password

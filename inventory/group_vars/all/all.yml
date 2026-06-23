@@ -1,12 +1,20 @@
 ---
-# Kickstart Preparation Variables
-local_iso_path: "/path/to/iso-dir" # directory where ISOs are located on controller
-iso_filename: "rhel-9.7-x86_64-dvd.iso"
-liveiso_filename: "CentOS-Stream-MIN-Live-Automation.x86_64-10.iso" # Live ISO for bare metal operations (introspection, storage wipe, etc.)
-img_filename: "oemdrv.img"
-local_workspace: "/tmp/kickstart"
+# =====================================================================
+# Bare Metal Provision — kvm_bare_metal_provision role
+# =====================================================================
+kvm_bare_metal_provision_local_workspace: "/tmp/kickstart"
+kvm_bare_metal_provision_img_filename: "oemdrv.img"
 
-# HTTP Server Configuration
-http_server_base_url: "http://provisioner.domain.test/provision"
+# =====================================================================
+# ISO Distribution — kvm_distribute_iso role
+# =====================================================================
+kvm_distribute_iso_filename: "rhel-9.7-x86_64-dvd.iso"
+kvm_distribute_iso_liveiso_filename: "CentOS-Stream-MIN-Live-Automation.x86_64-10.iso"  # Live ISO for bare metal operations
+kvm_distribute_iso_http_server_base_url: "http://provisioner.domain.test/provision"
+
+# =====================================================================
+# Wrapper-only HTTP server configuration (no role equivalent)
+# =====================================================================
+local_iso_path: "/path/to/iso-dir"  # Directory where ISOs are located on controller
 remote_http_docroot: "/var/www/html/provision"
 ...

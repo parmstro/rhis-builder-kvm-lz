@@ -7,10 +7,6 @@
   vars_files:
     - ../vars/vm_vars.yml
   tasks:
-    - name: Ensure the community.libvirt collection is installed
-      ansible.builtin.command: ansible-galaxy collection install community.libvirt
-      changed_when: false
-
     # =====================================================================
     # --- VM TARGETING ---
     # =====================================================================
@@ -40,10 +36,12 @@
       ansible.builtin.debug:
         msg: "Removing {{ host_vms | length }} VM(s) on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
 
-    - name: Remove VMs assigned to this host
-      ansible.builtin.include_tasks: ../tasks/vm_remove_task.yml
+    - name: Remove VM via collection role
+      ansible.builtin.include_role:
+        name: elise.rhis_builder_kvm_lz.kvm_remove_vm
       loop: "{{ host_vms }}"
       loop_control:
         loop_var: vm
+        label: "{{ vm.vmname }}"
       when: host_vms | length > 0
 ...

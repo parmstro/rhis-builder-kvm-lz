@@ -4,7 +4,7 @@
   become: true
   gather_facts: true
 
-  tasks:
+  pre_tasks:
     - name: Display host information
       ansible.builtin.debug:
         msg: "Configuring {{ host.hostname }}.{{ host.domain }} ({{ ansible_host }})"
@@ -25,97 +25,49 @@
       ansible.builtin.debug:
         msg: "System registered: {{ rhsm_register.changed }}"
 
-    # Ensure that the most up-to-date packages are applied
     - name: "Ensure the system is up to date" # noqa package-latest
       ansible.builtin.dnf:
         name: "*"
         state: latest
 
-    # =====================================================================
-    # --- Auto-detect NVMe Devices and Verify RAID Capability ---
-    # =====================================================================
+  # =====================================================================
+  # --- Collection Roles ---
+  # =====================================================================
 
-    - name: Detect NVMe devices and verify RAID capability
-      ansible.builtin.include_tasks: ../tasks/detect_nvme_raid_devices.yml
+  roles:
+    - role: elise.rhis_builder_kvm_lz.kvm_detect_nvme_raid
+      tags:
+        - detect
+        - raid
 
-    # =====================================================================
-    # --- RAID Configuration ---
-    # =====================================================================
-
-    - name: Configure mdadm RAID 10 array
-      ansible.builtin.include_tasks: ../tasks/setup_raid.yml
+    - role: elise.rhis_builder_kvm_lz.kvm_setup_raid
       tags:
         - raid
         - storage
 
-    # =====================================================================
-    # --- Libvirt Infrastructure Configuration ---
-    # =====================================================================
-
-    - name: Configure libvirt infrastructure
-      ansible.builtin.include_tasks: ../tasks/setup_libvirt.yml
+    - role: elise.rhis_builder_kvm_lz.kvm_setup_libvirt
       tags:
         - libvirt
         - network
         - storage
 
-    # =====================================================================
-    # --- ISO Distribution for VM Deployment ---
-    # =====================================================================
-
-    - name: Ensure required packages for VM kickstart are installed
-      ansible.builtin.dnf:
-        name:
-          - dosfstools
-          - mtools
-          - qemu-img
-        state: present
-
-    - name: Distribute RHEL ISO to hypervisors
-      ansible.builtin.include_tasks: ../tasks/distribute_iso.yml
+    - role: elise.rhis_builder_kvm_lz.kvm_distribute_iso
       tags:
         - iso
         - vm_prep
 
-    # =====================================================================
-    # --- System Performance Tuning ---
-    # =====================================================================
-
-    - name: Configure system performance tuning
-      ansible.builtin.include_tasks: ../tasks/setup_performance_tuning.yml
+    - role: elise.rhis_builder_kvm_lz.kvm_host_performance
       tags:
         - performance
         - tuning
 
-    # =====================================================================
-    # -- Enable Intel Virtualization Technology for Directed I/O (VT-d)  --
-    # =====================================================================
+  # =====================================================================
+  # --- Verification ---
+  # =====================================================================
 
-    - name: Check for Intel VT-d IOMMU hardware capability via ACPI DMAR table
-      ansible.builtin.stat:
-        path: /sys/firmware/acpi/tables/DMAR
-      register: intel_iommu_dmar
-
-    - name: Display Intel IOMMU hardware capability status
-      ansible.builtin.debug:
-        msg: >-
-          Intel VT-d (IOMMU):
-          {{ 'Present - proceeding with configuration' if intel_iommu_dmar.stat.exists
-          else 'Not present - skipping IOMMU configuration' }}
-
-    - name: Enable Intel Virtualization Technology for Directed I/O (VT-d)
-      ansible.builtin.include_tasks: ../tasks/setup_intel_iommu.yml
-      when: intel_iommu_dmar.stat.exists
-      tags:
-        - performance
-        - tuning
-
-    # =====================================================================
-    # --- Verification ---
-    # =====================================================================
-
+  post_tasks:
     - name: Verify RAID array status
-      ansible.builtin.command: mdadm --detail /dev/{{ raid_name }}
+      ansible.builtin.command: mdadm --detail /dev/{{ kvm_setup_raid_name }}
       register: raid_status
       changed_when: false
 
@@ -124,7 +76,7 @@
         var: raid_status.stdout_lines
 
     - name: Verify RAID partitions
-      ansible.builtin.command: parted -s /dev/{{ raid_name }} print
+      ansible.builtin.command: parted -s /dev/{{ kvm_setup_raid_name }} print
       register: partition_status
       changed_when: false
 
@@ -214,7 +166,7 @@
         fail_msg: "Please see debug validate results above for specific failures or warnings"
 
     - name: Verify libvirt network status
-      ansible.builtin.command: virsh net-info {{ libvirt_network_name }}
+      ansible.builtin.command: virsh net-info {{ kvm_setup_libvirt_network_name }}
       register: net_status
       changed_when: false
 
@@ -223,7 +175,7 @@
         var: net_status.stdout_lines
 
     - name: Verify filesystem storage pool status
-      ansible.builtin.command: virsh pool-info {{ libvirt_pool_filesystem_name }}
+      ansible.builtin.command: virsh pool-info {{ kvm_setup_libvirt_pool_filesystem_name }}
       register: pool_fs_status
       changed_when: false
       when: verify_uses_filesystem_mode | bool
@@ -234,7 +186,7 @@
       when: verify_uses_filesystem_mode | bool
 
     - name: Verify block storage pool status
-      ansible.builtin.command: virsh pool-info {{ libvirt_pool_block_name }}
+      ansible.builtin.command: virsh pool-info {{ kvm_setup_libvirt_pool_block_name }}
       register: pool_block_status
       changed_when: false
       when: verify_uses_block_mode | bool
@@ -244,6 +196,11 @@
         var: pool_block_status.stdout_lines
       when: verify_uses_block_mode | bool
 
+    - name: Query active tuned profile
+      ansible.builtin.command: tuned-adm active
+      register: tuned_active
+      changed_when: false
+
     - name: Summary
       ansible.builtin.debug:
         msg:
@@ -251,16 +208,16 @@
           - "KVM Host Configuration Complete"
           - "=========================================="
           - "Host: {{ host.hostname }}.{{ host.domain }}"
-          - "RAID: /dev/{{ raid_name }} (RAID {{ raid_level }})"
-          - "LVM PV: /dev/{{ raid_name }}"
-          - "Network: {{ libvirt_network_name }} (bridge: {{ libvirt_bridge_name }})"
+          - "RAID: /dev/{{ kvm_setup_raid_name }} (RAID {{ kvm_setup_raid_level }})"
+          - "LVM PV: /dev/{{ kvm_setup_raid_name }}"
+          - "Network: {{ kvm_setup_libvirt_network_name }} (bridge: {{ kvm_setup_libvirt_bridge_name }})"
           - "Storage Pools:"
           - >-
-            - Filesystem: {{ libvirt_pool_filesystem_name if verify_uses_filesystem_mode else 'Not configured' }}
-            ({{ libvirt_pool_filesystem_path if verify_uses_filesystem_mode else 'N/A' }})
+            - Filesystem: {{ kvm_setup_libvirt_pool_filesystem_name if verify_uses_filesystem_mode else 'Not configured' }}
+            ({{ kvm_setup_libvirt_pool_filesystem_path if verify_uses_filesystem_mode else 'N/A' }})
           - >-
-            - Block: {{ libvirt_pool_block_name if verify_uses_block_mode else 'Not configured' }}
-            (VG: {{ lvm_vg_block_name if verify_uses_block_mode else 'N/A' }})
+            - Block: {{ kvm_setup_libvirt_pool_block_name if verify_uses_block_mode else 'Not configured' }}
+            (VG: {{ kvm_setup_raid_lvm_vg_block_name if verify_uses_block_mode else 'N/A' }})
           - "Tuned Profile: {{ tuned_active.stdout }}"
           - "=========================================="
 

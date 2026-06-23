@@ -19,3 +19,6 @@ KVM*
 logs/
 .vscode/
 .claude/
+
+# Installed collections (install via: ansible-galaxy collection install -r requirements.yml --force -p collections/)
+collections/ansible_collections/

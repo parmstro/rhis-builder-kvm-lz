@@ -14,7 +14,8 @@
     # =====================================================================
 
     - name: Detect NVMe devices and verify RAID capability
-      ansible.builtin.include_tasks: ../tasks/detect_nvme_raid_devices.yml
+      ansible.builtin.import_role:
+        name: elise.rhis_builder_kvm_lz.kvm_detect_nvme_raid
 
     # =====================================================================
     # --- Verification Summary ---
@@ -27,8 +28,8 @@
           - "RAID 10 Capability Verification"
           - "=========================================="
           - "Host: {{ host.hostname }}.{{ host.domain }}"
-          - "RAID Level: {{ raid_level }}"
-          - "RAID Name: {{ raid_name }}"
+          - "RAID Level: {{ kvm_setup_raid_level }}"
+          - "RAID Name: {{ kvm_setup_raid_name }}"
           - "Number of devices: {{ host.additional_disks | length }}"
           - "Devices:"
           - "{{ host.additional_disks }}"

@@ -20,17 +20,23 @@
 
     - name: Ensure local workspace directory exists
       ansible.builtin.file:
-        path: "{{ local_workspace }}"
+        path: "{{ kvm_bare_metal_provision_local_workspace }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
 
     # =====================================================================
-    # --- PER-HOST KICKSTART AND IMAGE GENERATION via group_vars loop ---
+    # --- PER-HOST KICKSTART AND IMAGE GENERATION ---
     # =====================================================================
 
-    - name: Kickstart and image gen per host subtasks
-      ansible.builtin.include_tasks: "../tasks/bare_metal_deploy_prep_subtasks1.yml"
+    - name: Generate kickstart and OEMDRV image for each hypervisor
+      ansible.builtin.include_role:
+        name: elise.rhis_builder_kvm_lz.kvm_bare_metal_provision
       loop: "{{ groups['infra_servers'] }}"
+      loop_control:
+        loop_var: kvm_bm_target
+        label: "{{ kvm_bm_target }}"
+      vars:
+        host: "{{ hostvars[kvm_bm_target].host }}"
 
 - name: Prepare Virtual Media http_server for Kickstart Installation
   hosts: http_servers
@@ -45,7 +51,7 @@
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       become: true
 
     - name: Ensure target HTTP subdirectories exist
@@ -62,7 +68,7 @@
       ansible.builtin.file:
         path: "{{ remote_http_docroot }}/image/{{ hostvars[item].host.hostname }}"
         state: directory
-        mode: '0755'
+        mode: "0755"
       become: true
       loop: "{{ groups['infra_servers'] }}"
 
@@ -72,38 +78,40 @@
 
     - name: Copy local ISO to remote HTTP server iso subdirectory
       ansible.posix.synchronize:
-        src: "{{ local_iso_path }}/{{ iso_filename }}"
-        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ iso_filename }}"
+        src: "{{ local_iso_path }}/{{ kvm_distribute_iso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/iso/{{ kvm_distribute_iso_filename }}"
         rsync_opts:
           - "--chmod=0644"
       become: true
 
     - name: Copy local ISO to /dev/shm on remote HTTP server for tmpfs performance
       ansible.posix.synchronize:
-        src: "{{ local_iso_path }}/{{ iso_filename }}"
-        dest: "{{ remote_http_user }}@{{ remote_http_host }}:/dev/shm/{{ iso_filename }}"
+        src: "{{ local_iso_path }}/{{ kvm_distribute_iso_filename }}"
+        dest: "{{ remote_http_user }}@{{ remote_http_host }}:/dev/shm/{{ kvm_distribute_iso_filename }}"
         rsync_opts:
           - "--chmod=0644"
       become: true
-      when: iso_use_tmpfs | bool
+      when: kvm_distribute_iso_use_tmpfs | bool
 
     - name: Create symlink from HTTP docroot to ISO in /dev/shm
       ansible.builtin.file:
-        src: "/dev/shm/{{ iso_filename }}"
-        dest: "{{ remote_http_docroot }}/iso/{{ iso_filename }}"
+        src: "/dev/shm/{{ kvm_distribute_iso_filename }}"
+        dest: "{{ remote_http_docroot }}/iso/{{ kvm_distribute_iso_filename }}"
         state: link
         force: true
       become: true
-      when: iso_use_tmpfs | bool
+      when: kvm_distribute_iso_use_tmpfs | bool
 
     - name: Copy local OEMDRV image to remote HTTP server image subdirectory for each host
       ansible.posix.synchronize:
-        src: "{{ local_workspace }}/{{ hostvars[item].host.hostname }}-{{ img_filename }}"
-        dest: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}/image/{{ hostvars[item].host.hostname }}/{{ img_filename }}"
+        src: "{{ kvm_bare_metal_provision_local_workspace }}/{{ hostvars[item].host.hostname }}-{{ kvm_bare_metal_provision_img_filename }}"
+        dest: "{{ __oemdrv_dest_base }}/image/{{ hostvars[item].host.hostname }}/{{ kvm_bare_metal_provision_img_filename }}"
         rsync_opts:
           - "--chmod=0644"
       become: true
       loop: "{{ groups['infra_servers'] }}"
+      vars:
+        __oemdrv_dest_base: "{{ remote_http_user }}@{{ remote_http_host }}:{{ remote_http_docroot }}"
 
     # =====================================================================
     # --- SELINUX CONFIGURATION ---
@@ -157,10 +165,10 @@
           - index: 1
             insert: true
             media_type: "DVD"
-            image: "{{ http_server_base_url }}/iso/{{ iso_filename }}"
+            image: "{{ kvm_distribute_iso_http_server_base_url }}/iso/{{ kvm_distribute_iso_filename }}"
           - index: 2
             insert: true
             media_type: "USBStick"
-            image: "{{ http_server_base_url }}/image/{{ host.hostname }}/{{ img_filename }}"
-      delegate_to: localhost # Run from control node to the iDRAC IP
+            image: "{{ kvm_distribute_iso_http_server_base_url }}/image/{{ host.hostname }}/{{ kvm_bare_metal_provision_img_filename }}"
+      delegate_to: localhost  # Run from control node to the iDRAC IP
 ...

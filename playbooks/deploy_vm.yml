@@ -5,28 +5,32 @@
   vars_files:
     - ../vars/vm_vars.yml
   tasks:
-    - name: Ensure the community.libvirt collection is installed
-      ansible.builtin.command: ansible-galaxy collection install community.libvirt
-      changed_when: false
-      delegate_to: localhost
-
     - name: Filter VMs for this host
       ansible.builtin.set_fact:
         host_vms: "{{ vms | selectattr('target_host', 'equalto', inventory_hostname) | list }}"
 
     - name: Display VMs to deploy on this host
       ansible.builtin.debug:
-        msg: "Deploying {{ host_vms | length }} VM(s) in parallel on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}"
+        msg: >-
+          Deploying {{ host_vms | length }} VM(s) via {{ kvm_deploy_parallel_mode }} mode
+          on {{ inventory_hostname }}: {{ host_vms | map(attribute='vmname') | list }}
+
+    # =====================================================================
+    # --- Subprocess mode: per-VM log isolation via ansible-playbook calls ---
+    # Set kvm_deploy_parallel_mode: "subprocess" (default) for CLI-native per-VM logs
+    # =====================================================================
 
     - name: Ensure logs directory exists
       ansible.builtin.file:
         path: "{{ playbook_dir }}/../logs"
         state: directory
-        mode: '0755'
+        mode: "0755"
       delegate_to: localhost
-      when: host_vms | length > 0
+      when:
+        - kvm_deploy_parallel_mode == "subprocess"
+        - host_vms | length > 0
 
-    - name: Deploy VMs assigned to this host in parallel
+    - name: Deploy VMs assigned to this host in parallel (subprocess mode)
       ansible.builtin.shell: >
         ansible-playbook
         playbooks/deploy_single_vm.yml
@@ -42,9 +46,12 @@
       poll: 0
       register: vm_deploy_jobs
       delegate_to: localhost
-      when: host_vms | length > 0
+      when:
+        - kvm_deploy_parallel_mode == "subprocess"
+        - host_vms | length > 0
+      changed_when: true
 
-    - name: Wait for all VM deployments to complete
+    - name: Wait for all VM deployments to complete (subprocess mode)
       ansible.builtin.async_status:
         jid: "{{ item.ansible_job_id }}"
       loop: "{{ vm_deploy_jobs.results }}"
@@ -53,9 +60,11 @@
       retries: 360
       delay: 20
       delegate_to: localhost
-      when: host_vms | length > 0
+      when:
+        - kvm_deploy_parallel_mode == "subprocess"
+        - host_vms | length > 0
 
-    - name: Build deployment summary message
+    - name: Build deployment summary message (subprocess mode)
       ansible.builtin.set_fact:
         deployment_summary: |
           ==========================================
@@ -74,10 +83,33 @@
             tail -f logs/rhis_builder_kvm_lz_demo_{{ vm.vmname }}_prov.txt
           {% endfor %}
           ==========================================
-      when: host_vms | length > 0
+      when:
+        - kvm_deploy_parallel_mode == "subprocess"
+        - host_vms | length > 0
 
-    - name: Display deployment completion summary
+    - name: Display deployment completion summary (subprocess mode)
       ansible.builtin.debug:
         msg: "{{ deployment_summary }}"
-      when: host_vms | length > 0
+      when:
+        - kvm_deploy_parallel_mode == "subprocess"
+        - host_vms | length > 0
+
+    # =====================================================================
+    # --- Native mode: include_role loop; AAP-compatible ---
+    # Set kvm_deploy_parallel_mode: "native" when running under AAP where
+    # the controller manages output and per-VM log files are not needed.
+    # VMs on each host deploy sequentially; parallelism is across hosts
+    # via Ansible forks (one hypervisor per fork).
+    # =====================================================================
+
+    - name: Deploy VMs assigned to this host sequentially (native mode)
+      ansible.builtin.include_role:
+        name: elise.rhis_builder_kvm_lz.kvm_deploy_vm
+      loop: "{{ host_vms }}"
+      loop_control:
+        loop_var: vm
+        label: "{{ vm.vmname }}"
+      when:
+        - kvm_deploy_parallel_mode == "native"
+        - host_vms | length > 0
 ...
